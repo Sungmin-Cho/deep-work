@@ -234,6 +234,23 @@ test('invalidated release replacement verifies the prior digest before atomic ad
     /release-verification-receipt/);
   });
 
+test('release completion identity advances after an authenticated test retry',()=>{
+  const common={sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
+    current:{plan_authority_sha256:'1'.repeat(64)},
+    fields:{verification_plan_sha256:'2'.repeat(64)},
+    gateResults:[{gate_id:'GATE-full-relevant-suite'}],functional:[]};
+  const first=gate.buildReleaseVerificationCompletionPreconditions(common);
+  const retried=gate.buildReleaseVerificationCompletionPreconditions({
+    ...common,fields:{...common.fields,test_retry_count:1}});
+  assert.equal(Object.hasOwn(first,'retry_generation'),false);
+  assert.equal(retried.retry_generation,1);
+  assert.notEqual(gate.semanticDigest('release-verification-complete-v1',first),
+    gate.semanticDigest('release-verification-complete-v1',retried));
+  assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({
+    ...common,fields:{...common.fields,test_retry_count:'1'}}),
+  /release-verification-state/);
+});
+
 test('gate-fact-publish authenticates catalog inputs and adopts exact fact bytes',
   async(t)=>{
     const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'dw-gate-fact-')));

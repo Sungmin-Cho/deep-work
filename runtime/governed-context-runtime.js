@@ -275,7 +275,8 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
             operationId:checked.completion_operation_id,sessionId,
             kind:'functional-slice-complete-v2'});
           const result=producer?.result;
-          if(checked.slice_id!==slice.id||checked.slice_kind!=='functional'||
+          if(slice.checked!==true||checked.slice_id!==slice.id||
+              checked.slice_kind!=='functional'||
               checked.plan_authority_sha256!==plan.plan_authority_sha256||
               checked.verification_plan_sha256!==
                 fields.verification_plan_sha256||

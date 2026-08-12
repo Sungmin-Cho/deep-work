@@ -505,6 +505,19 @@ function loadPlan(planCapability,plan){
     fail('gate-plan');
   return current;
 }
+function buildReleaseVerificationCompletionPreconditions({sessionId,sliceId,current,
+  fields,gateResults,functional}={}){
+  const preconditions={session_id:sessionId,slice_id:sliceId,
+    plan_authority_sha256:current.plan_authority_sha256,
+    verification_plan_sha256:fields.verification_plan_sha256,
+    gate_results:gateResults,functional_receipts:functional};
+  const retryGeneration=fields.test_retry_count===undefined?0:
+    fields.test_retry_count;
+  if(!Number.isSafeInteger(retryGeneration)||retryGeneration<0)
+    fail('release-verification-state');
+  if(retryGeneration>0)preconditions.retry_generation=retryGeneration;
+  return preconditions;
+}
 function producerBindsInputRef({producer,ref,planAuthoritySha256,
   verificationPlanSha256}={}){
   const result=producer?.result;
@@ -1238,10 +1251,8 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     fail('release-verification-gates');
   const functional=await authenticateFunctionalReceiptRefs({stateCapability,
     plan:current,refs:functionalReceipts});
-  const preconditions={session_id:sid,slice_id:sliceId,
-    plan_authority_sha256:current.plan_authority_sha256,
-    verification_plan_sha256:fields.verification_plan_sha256,
-    gate_results:gateResults,functional_receipts:functional};
+  const preconditions=buildReleaseVerificationCompletionPreconditions({
+    sessionId:sid,sliceId,current,fields,gateResults,functional});
   const id=operationId('release-verification-complete-v1',preconditions);
   const receipt={schema_version:1,slice_id:sliceId,
     plan_authority_sha256:current.plan_authority_sha256,
@@ -1316,5 +1327,6 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   reconstructInvalidatedReleaseReceipt,normalizeReleaseVerificationReceipt,
   isInvalidatedReleaseReceipt,
   validateReleaseCompletionLedger,replaceInvalidatedReleaseReceipt,
+  buildReleaseVerificationCompletionPreconditions,
   releaseReceiptTargetLocks,
   publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};
