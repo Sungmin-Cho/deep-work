@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateRefactorEvidenceV1,semanticDigest,
   buildFunctionalReceiptTargetLocks,reconstructInvalidatedFunctionalReceipt,
-  functionalRecoveryOperationId}=require('./functional-receipt-runtime.js');
+  functionalRecoveryOperationId,validateFunctionalCompletionLedger}=require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
 const ref=(char)=>({operation_id:op(char),
@@ -71,6 +71,11 @@ test('invalidated legacy functional receipts reconstruct only their original v2 
     sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
     verificationPlanSha256:original.verification_plan_sha256}),
   /functional-recovery-receipt/);
+  const nativeInvalidated={...original,status:'invalidated'};
+  assert.deepEqual(reconstructInvalidatedFunctionalReceipt({
+    legacy:nativeInvalidated,sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
+    plan:{plan_authority_sha256:original.plan_authority_sha256},
+    verificationPlanSha256:original.verification_plan_sha256}),original);
 });
 test('functional receipt target locks follow capability path byte order',()=>{
   assertDeterministicCompletionIdentity();
@@ -115,4 +120,16 @@ test('functional receipt target locks follow capability path byte order',()=>{
     require.resolve('./functional-receipt-runtime.js'),'utf8'),
   /buildFunctionalReceiptTargetLocks\(\{root,targets:/,
   'publication must use the tested target-lock helper');
+});
+test('completion-ledger adoption returns the flat public result contract',()=>{
+  const current=receipt();
+  const result={session_id:'s-aaaaaaaa',slice_id:'SLICE-001',
+    receipt_path:'.deep-work/s-aaaaaaaa/receipts/SLICE-001.json',
+    receipt_sha256:current.receipt_sha256,post_state_sha256:'d'.repeat(64)};
+  const completed={stage:'completed-ledger',result,
+    resultSha256:require('./operation-journal.js').sha256(
+      require('./operation-journal.js').canonicalJson(result))};
+  assert.deepEqual(validateFunctionalCompletionLedger(completed,{
+    sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
+    receiptRelative:result.receipt_path,receipt:current}),result);
 });

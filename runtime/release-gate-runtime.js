@@ -432,33 +432,34 @@ function writeExclusive(file,value,code){
   if(!fs.readFileSync(file).equals(bytes))fail(code);
   return journal.sha256(bytes);
 }
+function isInvalidatedReleaseReceipt(value){
+  return value&&value.status==='invalidated'&&
+    (value.schema_version===1||value.schema_version==='1.0');
+}
+function releaseReceiptTargetLocks({root,planPath,receiptPath}={}){
+  if(typeof root!=='string'||!root||typeof planPath!=='string'||
+      typeof receiptPath!=='string')fail('release-verification-locks');
+  const targets=[planPath,receiptPath].sort((a,b)=>Buffer.compare(
+    Buffer.from(a),Buffer.from(b)));
+  return targets.map((target)=>({rank:transaction.RANKS.target,
+    capability:platform.issueProjectStateCapability(root,path.join(root,'.claude',
+      `deep-work.target.${journal.sha256(path.relative(root,target))}.lock`),
+      {allowMissingLeaf:true,role:'lock'})})).sort((a,b)=>Buffer.compare(
+        Buffer.from(a.capability.path),Buffer.from(b.capability.path)));
+}
 async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
   sliceId,relative,receipt}={}){
   const root=stateCapability.projectRoot,file=path.join(root,...relative.split('/'));
   if(!fs.existsSync(file))return false;
-  const existing=readCanonical(file,'release-verification-receipt').value;
-  if(existing.schema_version!=='1.0'||existing.status!=='invalidated')return false;
+  const existingRecord=readCanonical(file,'release-verification-receipt');
+  const existing=existingRecord.value;
+  if(!isInvalidatedReleaseReceipt(existing))return false;
   if(existing.slice_id!==sliceId||
       existing.plan_authority_sha256!==current.plan_authority_sha256||
       existing.verification_plan_sha256!==fields.verification_plan_sha256||
-      !OPERATION.test(existing.completion_operation_id||'')||
       !DIGEST.test(existing.receipt_sha256||'')||
       !Array.isArray(existing.gate_results)||
       !Array.isArray(existing.functional_receipts))
-    fail('release-verification-receipt');
-  const sid=transaction.sessionIdFromState(stateCapability),project=
-    transaction.projectCapabilityFor(stateCapability);
-  const parent=await journal.resumeOperation({projectCapability:project,
-    operationId:existing.completion_operation_id,sessionId:sid,
-    kind:'release-verification-complete'}).catch((error)=>{
-      if(error.code==='operation-not-found')return null;throw error;});
-  const result=parent?.result;
-  if(parent?.stage!=='completed-ledger'||!exactKeys(result,
-      ['slice_id','receipt_path','receipt_sha256','post_state_sha256'])||
-      result.slice_id!==sliceId||result.receipt_path!==relative||
-      result.receipt_sha256!==existing.receipt_sha256||
-      !DIGEST.test(result.post_state_sha256||'')||
-      parent.resultSha256!==journal.sha256(canonical(result)))
     fail('release-verification-receipt');
   const nextBytes=Buffer.from(canonical(receipt));
   const workDir=path.join(root,...String(fields.work_dir).split('/'));
@@ -467,6 +468,12 @@ async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
   const capability=transaction.issueSessionFileCapability({sessionCapability,
     candidate:file,allowedBasenames:[path.basename(file)],
     role:'release-verification-receipt'});
+  // The caller has authenticated a new gate-result identity. The target lock
+  // and byte-for-byte compare make replacement CAS-like: a concurrent writer
+  // cannot silently clobber a different invalidation state between read and
+  // rename.
+  if(!fs.readFileSync(file).equals(existingRecord.bytes))
+    fail('release-verification-receipt');
   transaction.atomicWriteSessionFile(capability,nextBytes);
   if(!fs.readFileSync(file).equals(nextBytes))fail('release-verification-receipt');
   return true;
@@ -1126,7 +1133,29 @@ function validateReleaseVerificationReceipt(value){
   return structuredClone(value);
 }
 async function publishReleaseVerificationReceipt({stateCapability,planCapability,plan,
-  sliceId,gateResults,functionalReceipts,seam}={}){
+  sliceId,gateResults,functionalReceipts,seam,_locksHeld=false}={}){
+  if(!_locksHeld){
+    const root=stateCapability?.projectRoot;
+    const sid=transaction.sessionIdFromState(stateCapability);
+    const fields=frontmatter.parseFrontmatter(
+      fs.readFileSync(stateCapability.path,'utf8')).fields;
+    if(typeof fields.work_dir!=='string')fail('release-verification-state');
+    const receiptPath=path.join(root,...fields.work_dir.split('/'),'receipts',
+      `${sliceId}.json`);
+    const locks=releaseReceiptTargetLocks({root,planPath:planCapability.path,
+      receiptPath});
+    return transaction.withRankedLocks([
+      {rank:transaction.RANKS.session,capability:platform.issueProjectStateCapability(
+        root,path.join(root,'.claude',`deep-work.${sid}.rank-operation.lock`),
+        {allowMissingLeaf:true,role:'lock'})},
+      {rank:transaction.RANKS.journal,capability:platform.issueProjectStateCapability(
+        root,path.join(root,'.claude',`deep-work.${sid}.rank-journal.lock`),
+        {allowMissingLeaf:true,role:'lock'})},
+      {rank:transaction.RANKS.state,capability:transaction.stateLock(stateCapability)},
+      ...locks,
+    ],()=>publishReleaseVerificationReceipt({stateCapability,planCapability,plan,
+      sliceId,gateResults,functionalReceipts,seam,_locksHeld:true}));
+  }
   const current=loadPlan(planCapability,plan),sid=
     transaction.sessionIdFromState(stateCapability);
   const fields=frontmatter.parseFrontmatter(

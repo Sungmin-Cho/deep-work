@@ -192,7 +192,7 @@ function readCanonical(file,code,max=16*1024*1024,allowNoLf=false){
   return{value,bytes};
 }
 function validateFunctionalCompletionLedger(completed,{sessionId,sliceId,
-  receiptRelative,receipt}={}){
+  receiptRelative,receipt,code='functional-recovery-parent'}={}){
   const result=completed?.result;
   if(completed?.stage!=='completed-ledger'||!exactKeys(result,
       ['session_id','slice_id','receipt_path','receipt_sha256',
@@ -201,8 +201,8 @@ function validateFunctionalCompletionLedger(completed,{sessionId,sliceId,
       result.receipt_sha256!==receipt.receipt_sha256||
       !DIGEST.test(result.post_state_sha256||'')||
       completed.resultSha256!==sha256(canonicalJson(result)))
-    fail('functional-recovery-parent');
-  return completed;
+    fail(code);
+  return result;
 }
 function functionalRecoveryOperationId({sessionId,sliceId,receipt}={}){
   return`op-${sha256(canonicalJson({domain:'functional-slice-recovery-v2',
@@ -214,19 +214,27 @@ function functionalRecoveryOperationId({sessionId,sliceId,receipt}={}){
 }
 function reconstructInvalidatedFunctionalReceipt({legacy,sessionId,sliceId,
   plan,verificationPlanSha256}={}){
-  if(!legacy||legacy.schema_version!=='1.0'||legacy.status!=='invalidated'||
+  if(!legacy||legacy.status!=='invalidated'||
       legacy.slice_id!==sliceId||legacy.slice_kind!=='functional'||
       legacy.plan_authority_sha256!==plan.plan_authority_sha256||
       legacy.verification_plan_sha256!==verificationPlanSha256)
     fail('functional-recovery-receipt');
-  let receipt;try{receipt=buildFunctionalSliceReceiptV2({session_id:sessionId,
-    slice_id:sliceId,plan_authority_sha256:legacy.plan_authority_sha256,
-    verification_plan_sha256:legacy.verification_plan_sha256,
-    red_proof_ref:legacy.red_proof_ref,
-    red_proof_sha256:legacy.red_proof_sha256,
-    red_proof_operation_id:legacy.red_proof_operation_id,
-    green_verification:legacy.green_verification,
-    refactor_evidence:legacy.refactor_evidence});}catch{fail('functional-recovery-receipt');}
+  let receipt;
+  try{
+    if(legacy.schema_version===2){
+      const candidate=structuredClone(legacy);delete candidate.status;
+      receipt=validateFunctionalSliceReceiptV2(candidate);
+    }else if(legacy.schema_version==='1.0'){
+      receipt=buildFunctionalSliceReceiptV2({session_id:sessionId,
+        slice_id:sliceId,plan_authority_sha256:legacy.plan_authority_sha256,
+        verification_plan_sha256:legacy.verification_plan_sha256,
+        red_proof_ref:legacy.red_proof_ref,
+        red_proof_sha256:legacy.red_proof_sha256,
+        red_proof_operation_id:legacy.red_proof_operation_id,
+        green_verification:legacy.green_verification,
+        refactor_evidence:legacy.refactor_evidence});
+    }else fail('functional-recovery-receipt');
+  }catch{fail('functional-recovery-receipt');}
   if(legacy.completion_operation_id!==receipt.completion_operation_id||
       legacy.receipt_sha256!==receipt.receipt_sha256)
     fail('functional-recovery-receipt');
@@ -244,11 +252,12 @@ async function recoverInvalidatedFunctionalSliceReceipt({stateCapability,
   const receiptPath=path.join(root,...receiptRelative.split('/'));
   if(!fs.existsSync(receiptPath))return null;
   const raw=readCanonical(receiptPath,'functional-recovery-receipt').value;
-  let receipt,legacy=false;
-  if(raw.schema_version==='1.0'&&raw.status==='invalidated'){
-    receipt=reconstructInvalidatedFunctionalReceipt({legacy:raw,sessionId:sid,
-      sliceId,plan:current,verificationPlanSha256:fields.verification_plan_sha256});
-    legacy=true;
+  let receipt;
+  if(raw.status==='invalidated'){
+    // An invalidated receipt is not an authorization to restore old evidence.
+    // The normal publication path must authenticate fresh evidence and issue
+    // a new receipt identity before replacing it.
+    return null;
   }else if(raw.schema_version===2){
     try{receipt=validateFunctionalSliceReceiptV2(raw);}catch{return null;}
   }else return null;
@@ -264,12 +273,12 @@ async function recoverInvalidatedFunctionalSliceReceipt({stateCapability,
   const prior=await journal.resumeOperation({projectCapability:project,
     operationId:recoveryId,sessionId:sid,kind:'functional-slice-recovery-v2'})
     .catch((error)=>{if(error.code==='operation-not-found')return null;throw error;});
-  if(!legacy&&!prior)return null;
+  if(!prior)return null;
   const parent=await journal.resumeOperation({projectCapability:project,
     operationId:receipt.completion_operation_id,sessionId:sid,
     kind:'functional-slice-complete-v2'}).catch((error)=>{
       if(error.code==='operation-not-found')return null;throw error;});
-  if(!parent){if(!legacy)return null;fail('functional-recovery-parent');}
+  if(!parent)return null;
   validateFunctionalCompletionLedger(parent,{sessionId:sid,sliceId,
     receiptRelative,receipt});
   if(prior?.stage==='completed-ledger'){
@@ -314,8 +323,7 @@ async function recoverInvalidatedFunctionalSliceReceipt({stateCapability,
   const receiptBytes=Buffer.from(canonicalJson(receipt));
   const currentReceipt=readCanonical(receiptPath,'functional-recovery-receipt');
   if(!currentReceipt.bytes.equals(receiptBytes)){
-    if(currentReceipt.value.schema_version!=='1.0'||
-        currentReceipt.value.status!=='invalidated')
+    if(currentReceipt.value.status==='invalidated')
       fail('functional-recovery-receipt');
     seam?.('before-receipt-write',{operationId:recoveryId,receiptPath});
     transaction.atomicWriteSessionFile(receiptCapability,receiptBytes);
@@ -549,7 +557,7 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     if(canonicalJson(stored)!==canonicalJson(receipt))
       fail('functional-completion-ledger');
     const result=validateFunctionalCompletionLedger(completed,{sessionId:sid,
-      sliceId,receiptRelative,receipt});
+      sliceId,receiptRelative,receipt,code:'functional-completion-ledger'});
     return{...result,operation_id:operationId,operation_receipt:completed,
       adopted:true};
   }
@@ -572,8 +580,24 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   const receiptBytes=Buffer.from(canonicalJson(receipt));
   fs.mkdirSync(path.dirname(receiptPath),{recursive:true});
   if(fs.existsSync(receiptPath)){
-    if(!fs.readFileSync(receiptPath).equals(receiptBytes))
-      fail('functional-receipt-adoption');
+    const existing=readCanonical(receiptPath,'functional-receipt-adoption');
+    if(!existing.bytes.equals(receiptBytes)){
+      if(existing.value.status!=='invalidated')fail('functional-receipt-adoption');
+      let invalidated;
+      try{invalidated=reconstructInvalidatedFunctionalReceipt({legacy:existing.value,
+        sessionId:sid,sliceId,plan:current,
+        verificationPlanSha256:fields.verification_plan_sha256});}
+      catch{fail('functional-receipt-adoption');}
+      if(invalidated.receipt_sha256===receipt.receipt_sha256||
+          invalidated.completion_operation_id===receipt.completion_operation_id)
+        fail('functional-recovery-fresh-evidence');
+      const capability=transaction.issueSessionFileCapability({
+        sessionCapability,candidate:receiptPath,allowedBasenames:[`${sliceId}.json`],
+        role:'functional-slice-receipt'});
+      seam?.('before-receipt-write',{operationId,receiptPath});
+      transaction.atomicWriteSessionFile(capability,receiptBytes);
+      seam?.('after-receipt-write-before-stage',{operationId,receiptPath});
+    }
   }else{
     const capability=transaction.issueSessionFileCapability({
       sessionCapability,candidate:receiptPath,allowedBasenames:[`${sliceId}.json`],
@@ -598,7 +622,9 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     active_slice:null,tdd_state:'PENDING',accepted_write_operation_id:null,
     accepted_write_receipt_sha256:null,accepted_write_class:null,
     functional_receipt_sha256:receipt.receipt_sha256,
-    functional_completion_operation_id:operationId});
+    functional_completion_operation_id:operationId,
+    implement_completed_at:nextPlan.slices.every((row)=>row.checked===true)?
+      currentFields.implement_completed_at||new Date().toISOString():undefined});
   if(afterState!==currentState){
     seam?.('before-state-write',{operationId});
     platform.atomicWriteFile(stateCapability,afterState);
@@ -618,6 +644,7 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
 module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   validateRefactorEvidenceV1,functionalCompletionOperationId,
   buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
+  validateFunctionalCompletionLedger,
   reconstructInvalidatedFunctionalReceipt,functionalRecoveryOperationId,
   authenticateVerificationResultRefV1,authenticateSensorResultRefV1,
   authenticateRedProof,buildFunctionalReceiptTargetLocks,
