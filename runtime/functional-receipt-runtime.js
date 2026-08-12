@@ -259,6 +259,21 @@ async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
     verificationReceipt,transitionReceipt,proofReceipt});
   return{proof,verificationReceipt,transitionReceipt,proofReceipt};
 }
+function buildFunctionalReceiptTargetLocks({root,targets,rank,
+  issueCapability}={}){
+  if(typeof root!=='string'||!root||!Array.isArray(targets)||!targets.length||
+      targets.some((target)=>typeof target!=='string'||!target)||
+      !Number.isInteger(rank)||typeof issueCapability!=='function')
+    fail('functional-completion-locks');
+  const requests=targets.map((target)=>({rank,
+    capability:issueCapability(root,path.join(root,'.claude',
+      `deep-work.target.${sha256(path.relative(root,target))}.lock`),
+    {allowMissingLeaf:true,role:'lock'})}));
+  if(requests.some((request)=>typeof request.capability?.path!=='string'||
+      !request.capability.path))fail('functional-completion-locks');
+  return requests.sort((a,b)=>Buffer.compare(Buffer.from(a.capability.path),
+    Buffer.from(b.capability.path)));
+}
 async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,plan,
   sliceId,greenVerification,refactorEvidence,seam,_locksHeld=false}={}){
   const platform=require('./platform.js');
@@ -274,11 +289,9 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     if(typeof workFields.work_dir!=='string')fail('functional-completion-state');
     const receiptPath=path.join(root,...workFields.work_dir.split('/'),'receipts',
       `${sliceId}.json`);
-    const targets=[planCapability.path,receiptPath].sort((a,b)=>
-      Buffer.compare(Buffer.from(a),Buffer.from(b))).map((target)=>({
-        rank:transaction.RANKS.target,capability:platform.issueProjectStateCapability(
-          root,path.join(root,'.claude',`deep-work.target.${sha256(
-            path.relative(root,target))}.lock`),{allowMissingLeaf:true,role:'lock'})}));
+    const targets=buildFunctionalReceiptTargetLocks({root,targets:
+      [planCapability.path,receiptPath],rank:transaction.RANKS.target,
+      issueCapability:platform.issueProjectStateCapability});
     return transaction.withRankedLocks([{rank:transaction.RANKS.session,
       capability:platform.issueProjectStateCapability(root,path.join(root,'.claude',
         `deep-work.${sid}.rank-operation.lock`),{allowMissingLeaf:true,role:'lock'})},
@@ -434,4 +447,5 @@ module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   validateRefactorEvidenceV1,functionalCompletionOperationId,
   buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   authenticateVerificationResultRefV1,authenticateSensorResultRefV1,
-  authenticateRedProof,publishFunctionalSliceReceiptV2,semanticDigest};
+  authenticateRedProof,buildFunctionalReceiptTargetLocks,
+  publishFunctionalSliceReceiptV2,semanticDigest};

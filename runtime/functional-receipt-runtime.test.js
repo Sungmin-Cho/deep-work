@@ -3,7 +3,8 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
-  validateRefactorEvidenceV1,semanticDigest}=require('./functional-receipt-runtime.js');
+  validateRefactorEvidenceV1,semanticDigest,
+  buildFunctionalReceiptTargetLocks}=require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
 const ref=(char)=>({operation_id:op(char),
@@ -30,27 +31,71 @@ function receipt(){
     green_verification:ref('c'),refactor_evidence:noRefactor()});
 }
 
-test('FunctionalSliceReceiptV2 derives exact deterministic completion identity',()=>{
+function assertDeterministicCompletionIdentity(){
   const first=receipt(),second=receipt();
   assert.deepEqual(first,second);
   assert.match(first.completion_operation_id,/^op-[0-9a-f]{64}$/);
   assert.equal(validateFunctionalSliceReceiptV2(first).receipt_sha256,
     first.receipt_sha256);
-});
+}
 
-test('refactor evidence rejects unsorted duplicate sensor authority',()=>{
+function assertDuplicateSensorAuthorityRejected(){
   const value=noRefactor();
   value.sensor_results.push({...value.sensor_results[0]});
   value.decision_sha256=semanticDigest('refactor-evidence-v1',value,
     'decision_sha256');
   assert.throws(()=>validateRefactorEvidenceV1(value),/sensor-result-refs/);
-});
+}
 
-test('receipt rejects swapped GREEN and red proof authority',()=>{
+function assertSwappedAuthorityRejected(){
   const green=receipt();green.green_verification.result_sha256='f'.repeat(64);
   assert.throws(()=>validateFunctionalSliceReceiptV2(green),
     /functional-receipt-digest/);
   const proof=receipt();proof.red_proof_sha256='f'.repeat(64);
   assert.throws(()=>validateFunctionalSliceReceiptV2(proof),
     /functional-receipt-digest/);
+}
+test('functional receipt target locks follow capability path byte order',()=>{
+  assertDeterministicCompletionIdentity();
+  assertDuplicateSensorAuthorityRejected();
+  assertSwappedAuthorityRejected();
+  assert.strictEqual(typeof buildFunctionalReceiptTargetLocks==='function',true,
+    'functional receipt target lock order invalid');
+  const crypto=require('node:crypto');
+  const path=require('node:path');
+  const lockPath=(pathApi,root,target)=>pathApi.join(root,'.claude',
+    `deep-work.target.${crypto.createHash('sha256')
+      .update(pathApi.relative(root,target)).digest('hex')}.lock`);
+  for(const [pathApi,root] of [[path.posix,'/repo'],[path.win32,'C:\\repo']]){
+    const targets=[pathApi.join(root,'.deep-work','s-00000000','plan.json'),
+      pathApi.join(root,'.deep-work','s-00000000','receipts','SLICE-001.json')]
+      .sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+    const derived=targets.map((target)=>lockPath(pathApi,root,target));
+    assert.deepEqual([...derived].sort((a,b)=>Buffer.compare(Buffer.from(a),
+      Buffer.from(b))),derived.toReversed(),
+    'deterministic target and lock orders must be inverted');
+  }
+  const root='/repo';
+  const targets=[path.join(root,'.deep-work','s-00000000','plan.json'),
+    path.join(root,'.deep-work','s-00000000','receipts','SLICE-001.json')]
+    .sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const derived=targets.map((target)=>lockPath(path,root,target));
+  assert.deepEqual([...derived].sort((a,b)=>Buffer.compare(Buffer.from(a),
+    Buffer.from(b))),derived.toReversed(),
+  'helper fixture must preserve the inverted target and lock orders');
+  const requests=buildFunctionalReceiptTargetLocks({root,targets,rank:4,
+    issueCapability:(_root,candidate)=>({path:candidate})});
+  assert.deepEqual(requests.map((row)=>row.capability.path),
+    [...derived].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b))),
+  'functional receipt target lock order invalid');
+  let emptyTargetsRejected=false;
+  try{buildFunctionalReceiptTargetLocks({root,targets:[],rank:4,
+    issueCapability:(_root,candidate)=>({path:candidate})});}
+  catch(error){emptyTargetsRejected=/functional-completion-locks/.test(error.message);}
+  assert.strictEqual(emptyTargetsRejected,true,
+    'functional receipt target lock order invalid');
+  assert.match(require('node:fs').readFileSync(
+    require.resolve('./functional-receipt-runtime.js'),'utf8'),
+  /buildFunctionalReceiptTargetLocks\(\{root,targets:/,
+  'publication must use the tested target-lock helper');
 });
