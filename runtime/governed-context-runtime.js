@@ -143,8 +143,8 @@ function blockersFor(point,context){
     if(context.evidence.status==='invalidated')out.push('evidence-invalidated');
     if(context.residualRisk.status!=='accepted')out.push('residual-risk-unaccepted');
     if(context.findings.status==='unknown')out.push('finding-required-unknown');
-    if(context.receipts.status==='unknown'||context.receipts.rows.some((row)=>
-      ['legacy-read-only','unknown'].includes(row.status)))out.push('receipt-invalid');
+    if(context.receipts.status!=='complete'||context.receipts.rows.some((row)=>
+      row.status!=='complete'))out.push('receipt-invalid');
     if(context.requiredGateIds.some((id)=>!context.satisfiedGateIds.includes(id)))
       out.push('gate-missing');
     if(context.redactionFailed)out.push('redaction-failed');

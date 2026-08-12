@@ -133,6 +133,10 @@ test('v6.14 immutable plan authority binds carriers and excludes progress',()=>{
   assert.notEqual(compileImmutablePlanAuthorityV2(drifted).plan_authority_sha256,first.plan_authority_sha256);
   const writableRelease=structuredClone(projection);writableRelease.slices[1].write_scope.production=['src/release.js'];
   assert.throws(()=>compileImmutablePlanAuthorityV2(writableRelease),/release-slice-write-scope/);
+  for(const checked of [null,0,'']){
+    const malformed=structuredClone(projection);malformed.slices[0].checked=checked;
+    assert.throws(()=>compileImmutablePlanAuthorityV2(malformed),/plan-authority-v2/);
+  }
 });
 
 test('first-RED Plan authority recomputes the exact VerificationSpecV2 digest and replan epoch',()=>{

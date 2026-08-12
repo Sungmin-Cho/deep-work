@@ -122,6 +122,23 @@ test('only finish admissions add a missing Critical human acknowledgment',()=>{
     ['human-ack-missing']);
 });
 
+test('every non-complete receipt projection blocks test and finish admissions',()=>{
+  const projection=buildProgressProjectionV1({...empty,
+    plan_identity:{status:'current',plan_authority_sha256:'1'.repeat(64),
+      verification_plan_sha256:'2'.repeat(64)},
+    evidence:{status:'complete',required_ids:[],completed_ids:[],missing_ids:[],
+      invalidated_ids:[]},residual_risk:{status:'accepted',class:'medium',accepted:true,
+      blocking_reasons:[]},findings:{status:'complete',points:[]},
+    receipts:{status:'incomplete',rows:[{slice_id:'SLICE-001',
+      slice_kind:'functional',status:'invalidated',receipt_sha256:'3'.repeat(64)}]},
+    required_gate_ids:[],satisfied_gate_ids:[],warnings:[]}).projection;
+  for(const point of ['test','finish-pre-action','finish-finalize']){
+    const admission=selectGovernedAdmission(projection,point);
+    assert.equal(admission.allowed,false);
+    assert.deepEqual(admission.blocking_codes,['receipt-invalid']);
+  }
+});
+
 test('the governed loader emits the same no-plan bytes consumed by all readers',(t)=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'dw-governed-context-'));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -248,6 +265,28 @@ x
   assert.equal(admission.blocking_codes.includes('external-change-lock'),false);
   assert.equal(admission.blocking_codes.includes('gate-missing'),false);
   assert.equal(admission.satisfied_gate_ids.includes('GATE-human-ack'),true);
+  const invalidatedRelease={schema_version:1,slice_id:'SLICE-001',
+    plan_authority_sha256:plan.plan_authority_sha256,
+    verification_plan_sha256:verificationPlan.plan_sha256,
+    gate_results:[{gate_id:'GATE-full-relevant-suite',
+      operation_id:`op-${'3'.repeat(64)}`,
+      result_path:`.deep-work/${sessionId}/gate-results/op-${'3'.repeat(64)}.json`,
+      result_sha256:'4'.repeat(64),ledger_result_sha256:'5'.repeat(64),
+      checker_id:'command-v1',argv_sha256:releaseRuntime.argvSha256(['npm','test'])}],
+    functional_receipts:[],completion_operation_id:`op-${'6'.repeat(64)}`,
+    receipt_sha256:null};
+  invalidatedRelease.receipt_sha256=journal.sha256(journal.canonicalJson(
+    Object.fromEntries(Object.entries(invalidatedRelease).filter(([key])=>
+      key!=='receipt_sha256'))));
+  fs.mkdirSync(path.join(work,'receipts'),{recursive:true});
+  fs.writeFileSync(path.join(work,'receipts','SLICE-001.json'),journal.canonicalJson({
+    ...invalidatedRelease,status:'invalidated'}));
+  const invalidatedProjection=loadGovernedContext({stateCapability}).projection;
+  assert.equal(invalidatedProjection.receipts.status,'incomplete');
+  assert.equal(invalidatedProjection.receipts.rows[0].status,'invalidated');
+  for(const point of ['test','finish-pre-action','finish-finalize'])
+    assert.equal(selectGovernedAdmission(invalidatedProjection,point)
+      .blocking_codes.includes('receipt-invalid'),true);
   evidenceRuntime.loadCommittedPackage=originalLoadCommittedPackage;
   evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluateEvidenceCompleteness;
 

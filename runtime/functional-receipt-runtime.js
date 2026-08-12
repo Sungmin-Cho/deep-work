@@ -222,7 +222,7 @@ function reconstructInvalidatedFunctionalReceipt({legacy,sessionId,sliceId,
   return receipt;
 }
 function assertFunctionalRecoveryState({target,fields}={}){
-  if(target?.checked===true||fields?.active_slice!==target?.id||
+  if(target?.checked!==false||fields?.active_slice!==target?.id||
       fields?.tdd_state!=='SENSOR_CLEAN')
     fail('functional-recovery-plan-not-reset');
   return true;

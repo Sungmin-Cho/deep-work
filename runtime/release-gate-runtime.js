@@ -1270,7 +1270,7 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     return{...existing.result,operation_id:id,
       operation_receipt:existing,adopted:true};
   }
-  if(slice.checked)fail('release-verification-state');
+  if(slice.checked!==false)fail('release-verification-state');
   const operation=await journal.beginOperation({projectCapability:project,
     sessionId:sid,kind:'release-verification-complete',operationId:id,
     preconditions});

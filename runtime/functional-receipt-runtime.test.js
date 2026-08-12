@@ -146,6 +146,10 @@ test('invalidated functional replacement requires a reset plan and fresh TDD cyc
     target:{id:'SLICE-001',checked:false},
     fields:{active_slice:'SLICE-001',tdd_state:'GREEN'}}),
   /functional-recovery-plan-not-reset/);
+  for(const checked of [null,0,''])assert.throws(()=>assertFunctionalRecoveryState({
+    target:{id:'SLICE-001',checked},
+    fields:{active_slice:'SLICE-001',tdd_state:'SENSOR_CLEAN'}}),
+  /functional-recovery-plan-not-reset/);
   assert.equal(assertFunctionalRecoveryState({
     target:{id:'SLICE-001',checked:false},
     fields:{active_slice:'SLICE-001',tdd_state:'SENSOR_CLEAN'}}),true);
