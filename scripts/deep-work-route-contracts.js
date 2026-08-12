@@ -165,7 +165,7 @@ const ROUTE_CONTRACTS=new Map([
       'active_slice','tdd_state','implement_completed_at',
       'completed-operation-ledger'],['implement'],
     'session-transaction',[10,20,50,70],'journal-ledger',
-    'functional-slice-complete-v2|functional-slice-recovery-v2',false,false)],
+    'functional-slice-complete-v2',false,false)],
   ['implement refactor no-change',c('implement-refactor-no-change-route-v1',
     ['session-state','locked-plan','validated-slice',
       'verification-result-ref-v1','validated-no-refactor-reason'],

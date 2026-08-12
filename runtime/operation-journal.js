@@ -34,7 +34,7 @@ const OPERATION_KINDS = new Set([
     'gate-fact-publish',
     'release-source-graph-publish',
     'release-gate-result', 'release-verification-complete',
-    'functional-slice-complete-v2', 'functional-slice-recovery-v2',
+    'functional-slice-complete-v2',
     'refactor-no-change-decision',
 ]);
 
@@ -125,8 +125,6 @@ const WORKFLOW_STAGE_RULES = Object.freeze({
     'ref-artifact-published','ref-committed'],
   'functional-slice-complete-v2':['evidence-authenticated','receipt-published',
     'progress-committed'],
-  'functional-slice-recovery-v2':['evidence-authenticated','receipt-published',
-    'progress-committed'],
   'refactor-no-change-decision':['green-authenticated','decision-published',
     'decision-committed'],
 });
@@ -140,7 +138,7 @@ const ORDERED_WORKFLOW_KINDS=new Set(['bootstrap-abort','bootstrap-failure-publi
   'gate-fact-publish',
   'release-source-graph-publish','release-gate-result',
   'release-verification-complete',
-  'functional-slice-complete-v2','functional-slice-recovery-v2',
+  'functional-slice-complete-v2',
   'refactor-no-change-decision']);
 const LOCK_OPTIONS = Object.freeze({timeoutMs:10_000, staleMs:30_000, heartbeatMs:1_000,
   processIdentity:crypto.createHash('sha256').update(`operation-journal:${process.pid}`).digest('hex').slice(0,32)});

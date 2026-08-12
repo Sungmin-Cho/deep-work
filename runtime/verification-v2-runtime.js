@@ -9,6 +9,7 @@ const journal=require('./operation-journal.js');
 const frontmatter=require('./frontmatter.js');
 const bootstrap=require('./bootstrap-runtime.js');
 const planRuntime=require('./plan-runtime.js');
+const {CLASS_FIELD}=planRuntime;
 const {runSupervisedProcess}=require('./process-supervisor.js');
 
 const DIGEST=/^[0-9a-f]{64}$/;
@@ -81,8 +82,7 @@ async function acceptedWrite({stateCapability,plan,sliceId,fields,expectedOutcom
   }catch{fail('verification-v2-write');}
   const planSha256=planRuntime.canonicalizePlanScopeV1(plan).sha256;
   const slice=plan.slices.find((row)=>row.id===sliceId);
-  const field={'failing-test':'failing_test',production:'production',
-    refactor:'refactor'}[receipt.writeClass];
+  const field=CLASS_FIELD[receipt.writeClass];
   const authority=receipt.authority;
   const allPlanFiles=new Set(plan.slices.flatMap((row)=>row.files||[]));
   const historicalAuthorityValid=explicitOperationId&&field&&authority&&

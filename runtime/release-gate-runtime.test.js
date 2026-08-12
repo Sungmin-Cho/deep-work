@@ -147,6 +147,26 @@ test('ReleaseVerificationReceiptV1 rejects content changed after publication',()
   /release-verification-receipt/);
 });
 
+test('invalidated release receipts accept only native numeric v1 shape and use ranked target locks',(t)=>{
+  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:1,
+    status:'invalidated'}),true);
+  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:'1.0',
+    status:'invalidated'}),true);
+  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:2,
+    status:'invalidated'}),false);
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'dw-release-locks-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const locks=gate.releaseReceiptTargetLocks({root,
+    planPath:path.join(root,'.deep-work/s-aaaaaaaa/plan.json'),
+    receiptPath:path.join(root,'.deep-work/s-aaaaaaaa/receipts/SLICE-001.json')});
+  assert.deepEqual(locks.map((row)=>row.rank),[70,70]);
+  assert.ok(locks.every((row)=>row.capability.role==='lock'));
+  assert.deepEqual(locks.map((row)=>row.capability.path),[...locks]
+    .map((row)=>row.capability.path).sort((a,b)=>Buffer.compare(
+      Buffer.from(a),Buffer.from(b))));
+});
+
 test('gate-fact-publish authenticates catalog inputs and adopts exact fact bytes',
   async(t)=>{
     const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'dw-gate-fact-')));

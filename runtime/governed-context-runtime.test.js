@@ -12,7 +12,7 @@ const {compileImmutablePlanAuthorityV2}=require('./plan-runtime.js');
 const {compileVerificationPlan}=require('./verification-policy-runtime.js');
 const {semanticDigest}=require('./release-gate-runtime.js');
 const {buildProgressProjectionV1,selectGovernedAdmission,loadGovernedContext,
-  validateSessionAuthority}=
+  validateSessionAuthority,deriveAdmissionSatisfiedGateIds}=
   require('./governed-context-runtime.js');
 const reportRuntime=require('./report-runtime.js');
 
@@ -21,6 +21,15 @@ const empty={evidence:{status:'unknown',required_ids:[],completed_ids:[],missing
   blocking_reasons:[]},replan:{status:'none',epoch:null,reason:null,trigger_id:null},
 invalidations:[],findings:{status:'unknown',points:[]},receipts:{status:'unknown',rows:[]},
 required_gate_ids:[],satisfied_gate_ids:[],warnings:['projection-input-missing']};
+
+test('evidence admission pseudo-gates require their exact positive predicates',()=>{
+  const base=['GATE-targeted-tests'];
+  assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:true,
+    redaction:{passed:true}},base),[
+    'GATE-evidence-completeness','GATE-redaction','GATE-targeted-tests']);
+  assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:false,
+    redaction:{passed:false}},base),base);
+});
 
 test('no-plan projection has exact defaults and only compatibility plus gate blockers',()=>{
   const built=buildProgressProjectionV1({...empty,plan_identity:{status:'missing',
@@ -179,6 +188,8 @@ x
   assert.equal(testAdmission.required_gate_ids.includes('GATE-redaction'),true);
   assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-evidence-completeness'),true);
   assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-redaction'),true);
+  evidenceRuntime.loadCommittedPackage=originalLoadCommittedPackage;
+  evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluateEvidenceCompleteness;
   let admission=selectGovernedAdmission(
     loadGovernedContext({stateCapability}).projection,'finish-finalize');
   assert.equal(admission.blocking_codes.includes('human-ack-missing'),true);

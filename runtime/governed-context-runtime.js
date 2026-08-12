@@ -19,6 +19,12 @@ function exactKeys(value,keys){return value&&typeof value==='object'&&!Array.isA
   canonicalJson(Object.keys(value).sort())===canonicalJson([...keys].sort());}
 function sorted(values){return [...new Set(values||[])].sort((a,b)=>
   Buffer.compare(Buffer.from(a),Buffer.from(b)));}
+function deriveAdmissionSatisfiedGateIds(summary,satisfied=[]){
+  const projected=[...satisfied];
+  if(summary?.complete===true)projected.push('GATE-evidence-completeness');
+  if(summary?.redaction?.passed===true)projected.push('GATE-redaction');
+  return sorted(projected);
+}
 function exactSorted(values){return Array.isArray(values)&&
   canonicalJson(values)===canonicalJson(sorted(values));}
 function assertDigestOrNull(value){return value===null||DIGEST.test(value||'');}
@@ -401,9 +407,7 @@ function loadGovernedContext({stateCapability}={}){
           {artifactRoot:workDir});
         evidenceSummary=summary;
         satisfied=sorted(summary.satisfied_gate_ids);
-        admissionSatisfied=[...satisfied];
-        if(summary.complete)admissionSatisfied.push('GATE-evidence-completeness');
-        if(summary.redaction.passed)admissionSatisfied.push('GATE-redaction');
+        admissionSatisfied=deriveAdmissionSatisfiedGateIds(summary,satisfied);
         evidence={status:summary.complete?'complete':'incomplete',
           required_ids:sorted(verificationPlan.evidence_required_gate_ids),
           completed_ids:satisfied,missing_ids:sorted(summary.missing_gate_ids),
@@ -488,4 +492,5 @@ function validateSessionAuthority({stateCapability}={}){
 }
 
 module.exports={buildProgressProjectionV1,validateProgressProjectionV1,
-  selectGovernedAdmission,loadGovernedContext,validateSessionAuthority};
+  deriveAdmissionSatisfiedGateIds,selectGovernedAdmission,loadGovernedContext,
+  validateSessionAuthority};

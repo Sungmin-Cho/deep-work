@@ -461,6 +461,9 @@ async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
       !Array.isArray(existing.gate_results)||
       !Array.isArray(existing.functional_receipts))
     fail('release-verification-receipt');
+  if(existing.receipt_sha256===receipt.receipt_sha256||
+      existing.completion_operation_id===receipt.completion_operation_id)
+    fail('release-verification-recovery-required');
   const nextBytes=Buffer.from(canonical(receipt));
   const workDir=path.join(root,...String(fields.work_dir).split('/'));
   const sessionCapability=platform.issueProjectStateCapability(root,workDir,
@@ -1244,4 +1247,5 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   publishCommandGateResult,
   publishReleaseIntegrityGateResult,
   gateResultRefs,validateReleaseVerificationReceipt,
+  isInvalidatedReleaseReceipt,releaseReceiptTargetLocks,
   publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};
