@@ -834,6 +834,9 @@ test('fresh pure-LOW v6.13 production flow compiles minimal authority and reache
     failedSlices:[],verification_plan_sha256:verificationPlan.plan_sha256,package_sha256:published.package.package_sha256,
     gates:requiredGateIds(verificationPlan,{at:'test'}).map((id)=>({id,status:'pass',evidence_ids:published.package.records
       .filter((row)=>row.gate_id===id&&row.status==='pass').map((row)=>row.evidence_id)}))};
+  const completedProjection=JSON.parse(fs.readFileSync(path.join(work,'plan.json'),'utf8'));
+  completedProjection.slices[0].checked=true;
+  fs.writeFileSync(path.join(work,'plan.json'),canonicalJson(completedProjection));
   const gatePath=writeJson(path.join(work,'gate-results.json'),gateResults);await dispatch(['test','pass','--state',state,'--plan',
     path.join(work,'plan.json'),'--gate-results-json',gatePath,'--at',ROUTE_TIMESTAMP],{cwd:root});
   fields=parseFrontmatter(fs.readFileSync(state,'utf8')).fields;assert.equal(fields.test_passed,true);

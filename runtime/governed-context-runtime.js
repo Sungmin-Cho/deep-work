@@ -389,7 +389,7 @@ function loadGovernedContext({stateCapability}={}){
     const copy=structuredClone(row);delete copy.schema_version;return copy;});
   if(activeReplan)warnings.push('invalidation-active');
   let evidence={status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
-    invalidated_ids:[]},satisfied=[],evidenceSummary=null;
+    invalidated_ids:[]},satisfied=[],admissionSatisfied=[],evidenceSummary=null;
   if(verificationPlan){
     evidence.required_ids=sorted(verificationPlan.evidence_required_gate_ids);
     try{
@@ -401,6 +401,9 @@ function loadGovernedContext({stateCapability}={}){
           {artifactRoot:workDir});
         evidenceSummary=summary;
         satisfied=sorted(summary.satisfied_gate_ids);
+        admissionSatisfied=[...satisfied];
+        if(summary.complete)admissionSatisfied.push('GATE-evidence-completeness');
+        if(summary.redaction.passed)admissionSatisfied.push('GATE-redaction');
         evidence={status:summary.complete?'complete':'incomplete',
           required_ids:sorted(verificationPlan.evidence_required_gate_ids),
           completed_ids:satisfied,missing_ids:sorted(summary.missing_gate_ids),
@@ -442,7 +445,7 @@ function loadGovernedContext({stateCapability}={}){
   const policy=require('./verification-policy-runtime.js');
   const requiredByPoint=Object.fromEntries(POINTS.map((point)=>[point,verificationPlan?
     policy.requiredGateIds(verificationPlan,{at:point==='test'?'test':'finish'}):[]]));
-  const satisfiedByPoint=Object.fromEntries(POINTS.map((point)=>[point,satisfied]));
+  const satisfiedByPoint=Object.fromEntries(POINTS.map((point)=>[point,admissionSatisfied]));
   const humanAckRequired=verificationPlan?.risk_class==='critical';
   const hasRequiredHumanAck=Object.values(reviewExecution.points||{}).some((point)=>
     point?.human_ack?.required===true);

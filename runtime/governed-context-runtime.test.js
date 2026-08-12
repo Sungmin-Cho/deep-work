@@ -162,6 +162,23 @@ x
   const stateCapability=platform.issueProjectStateCapability(root,statePath,{
     role:'session-state'});
   assert.equal(validateSessionAuthority({stateCapability}).status,'current');
+  const evidenceRuntime=require('./evidence-runtime.js');
+  const originalLoadCommittedPackage=evidenceRuntime.loadCommittedPackage;
+  const originalEvaluateEvidenceCompleteness=evidenceRuntime.evaluateEvidenceCompleteness;
+  evidenceRuntime.loadCommittedPackage=()=>({schema_version:2});
+  evidenceRuntime.evaluateEvidenceCompleteness=()=>({complete:true,
+    redaction:{passed:true},satisfied_gate_ids:verificationPlan.evidence_required_gate_ids,
+    missing_gate_ids:[],unverified_areas:[]});
+  t.after(()=>{
+    evidenceRuntime.loadCommittedPackage=originalLoadCommittedPackage;
+    evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluateEvidenceCompleteness;
+  });
+  const completeEvidenceProjection=loadGovernedContext({stateCapability}).projection;
+  const testAdmission=selectGovernedAdmission(completeEvidenceProjection,'test');
+  assert.equal(testAdmission.required_gate_ids.includes('GATE-evidence-completeness'),true);
+  assert.equal(testAdmission.required_gate_ids.includes('GATE-redaction'),true);
+  assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-evidence-completeness'),true);
+  assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-redaction'),true);
   let admission=selectGovernedAdmission(
     loadGovernedContext({stateCapability}).projection,'finish-finalize');
   assert.equal(admission.blocking_codes.includes('human-ack-missing'),true);
