@@ -60,18 +60,23 @@ test('invalidated native functional receipts reconstruct only their original v2 
   const original=receipt();
   const invalidated={...original,status:'invalidated'};
   const reconstructed=reconstructInvalidatedFunctionalReceipt({legacy:invalidated,
-    sliceId:'SLICE-001',
+    sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
     plan:{plan_authority_sha256:original.plan_authority_sha256},
     verificationPlanSha256:original.verification_plan_sha256});
   assert.deepEqual(reconstructed,original);
   assert.throws(()=>reconstructInvalidatedFunctionalReceipt({
     legacy:{...invalidated,receipt_sha256:'0'.repeat(64)},
-    sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
+    sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
     verificationPlanSha256:original.verification_plan_sha256}),
   /functional-recovery-receipt/);
   assert.throws(()=>reconstructInvalidatedFunctionalReceipt({
     legacy:{...invalidated,schema_version:'1.0'},
-    sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
+    sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
+    verificationPlanSha256:original.verification_plan_sha256}),
+  /functional-recovery-receipt/);
+  assert.throws(()=>reconstructInvalidatedFunctionalReceipt({legacy:invalidated,
+    sessionId:'s-bbbbbbbb',sliceId:'SLICE-001',
+    plan:{plan_authority_sha256:original.plan_authority_sha256},
     verificationPlanSha256:original.verification_plan_sha256}),
   /functional-recovery-receipt/);
 });

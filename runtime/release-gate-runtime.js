@@ -11,6 +11,12 @@ const platform=require('./platform.js');
 
 const DIGEST=/^[0-9a-f]{64}$/;
 const OPERATION=/^op-[0-9a-f]{64}$/;
+const RELEASE_RECEIPT_KEYS=['schema_version','slice_id','plan_authority_sha256',
+  'verification_plan_sha256','gate_results','functional_receipts',
+  'completion_operation_id','receipt_sha256'];
+const LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS=[...RELEASE_RECEIPT_KEYS,
+  'estimated_cost','git_after','git_before','goal','model_auto_selected',
+  'model_override_reason','model_used','status','tdd_mode','worktree_branch'];
 const SEMVER=/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 function fail(code,message=code){const error=new Error(`[${code}] ${message}`);
   error.code=code;throw error;}
@@ -432,10 +438,6 @@ function writeExclusive(file,value,code){
   if(!fs.readFileSync(file).equals(bytes))fail(code);
   return journal.sha256(bytes);
 }
-function isInvalidatedReleaseReceipt(value){
-  return value&&value.status==='invalidated'&&
-    (value.schema_version===1||value.schema_version==='1.0');
-}
 function releaseReceiptTargetLocks({root,planPath,receiptPath}={}){
   if(typeof root!=='string'||!root||typeof planPath!=='string'||
       typeof receiptPath!=='string')fail('release-verification-locks');
@@ -452,8 +454,11 @@ async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
   const root=stateCapability.projectRoot,file=path.join(root,...relative.split('/'));
   if(!fs.existsSync(file))return false;
   const existingRecord=readCanonical(file,'release-verification-receipt');
-  const existing=existingRecord.value;
-  if(!isInvalidatedReleaseReceipt(existing))return false;
+  const rawExisting=existingRecord.value;
+  if(rawExisting.status!=='invalidated')return false;
+  let existing;
+  try{existing=reconstructInvalidatedReleaseReceipt(rawExisting);}
+  catch{fail('release-verification-receipt');}
   if(existing.slice_id!==sliceId||
       existing.plan_authority_sha256!==current.plan_authority_sha256||
       existing.verification_plan_sha256!==fields.verification_plan_sha256||
@@ -471,10 +476,9 @@ async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
   const capability=transaction.issueSessionFileCapability({sessionCapability,
     candidate:file,allowedBasenames:[path.basename(file)],
     role:'release-verification-receipt'});
-  // The caller has authenticated a new gate-result identity. The target lock
-  // and byte-for-byte compare make replacement CAS-like: a concurrent writer
-  // cannot silently clobber a different invalidation state between read and
-  // rename.
+  // The caller has authenticated a new gate-result identity. The ranked target
+  // lock serializes invalidation and replacement; this byte comparison rejects
+  // any state drift observed before the atomic rename.
   if(!fs.readFileSync(file).equals(existingRecord.bytes))
     fail('release-verification-receipt');
   transaction.atomicWriteSessionFile(capability,nextBytes);
@@ -1114,9 +1118,7 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
 function releaseReceiptDigest(value){const copy=structuredClone(value);
   delete copy.receipt_sha256;return journal.sha256(canonical(copy));}
 function validateReleaseVerificationReceipt(value){
-  if(!exactKeys(value,['schema_version','slice_id','plan_authority_sha256',
-    'verification_plan_sha256','gate_results','functional_receipts',
-    'completion_operation_id','receipt_sha256'])||value.schema_version!==1||
+  if(!exactKeys(value,RELEASE_RECEIPT_KEYS)||value.schema_version!==1||
       !/^SLICE-\d{3}$/.test(value.slice_id||'')||
       !DIGEST.test(value.plan_authority_sha256||'')||
       !DIGEST.test(value.verification_plan_sha256||'')||
@@ -1134,6 +1136,40 @@ function validateReleaseVerificationReceipt(value){
       value.receipt_sha256!==releaseReceiptDigest(value))
     fail('release-verification-receipt');
   return structuredClone(value);
+}
+function reconstructInvalidatedReleaseReceipt(value){
+  if(!value||value.status!=='invalidated')fail('release-verification-recovery');
+  let candidate;
+  if(value.schema_version===1){
+    candidate=structuredClone(value);delete candidate.status;
+  }else if(value.schema_version==='1.0'){
+    if(!exactKeys(value,LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS))
+      fail('release-verification-recovery');
+    candidate=Object.fromEntries(RELEASE_RECEIPT_KEYS.map((key)=>
+      [key,value[key]]));candidate.schema_version=1;
+  }else fail('release-verification-recovery');
+  try{validateReleaseVerificationReceipt(candidate);}catch{
+    fail('release-verification-recovery');
+  }
+  if(candidate.receipt_sha256!==value.receipt_sha256)
+    fail('release-verification-recovery');
+  return candidate;
+}
+function isInvalidatedReleaseReceipt(value){
+  try{reconstructInvalidatedReleaseReceipt(value);return true;}catch{return false;}
+}
+function validateReleaseCompletionLedger(completed,{sliceId,receiptRelative,
+  receipt,operationId}={}){
+  const result=completed?.result;
+  if(completed?.stage!=='completed-ledger'||!exactKeys(result,
+      ['slice_id','receipt_path','receipt_sha256','post_state_sha256'])||
+      result.slice_id!==sliceId||result.receipt_path!==receiptRelative||
+      result.receipt_sha256!==receipt.receipt_sha256||
+      !DIGEST.test(result.post_state_sha256||'')||
+      receipt.completion_operation_id!==operationId||
+      completed.resultSha256!==journal.sha256(canonical(result)))
+    fail('release-verification-adoption');
+  return result;
 }
 async function publishReleaseVerificationReceipt({stateCapability,planCapability,plan,
   sliceId,gateResults,functionalReceipts,seam,_locksHeld=false}={}){
@@ -1181,18 +1217,30 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     verification_plan_sha256:fields.verification_plan_sha256,
     gate_results:gateResults,functional_receipts:functional};
   const id=operationId('release-verification-complete-v1',preconditions);
+  const receipt={schema_version:1,slice_id:sliceId,
+    plan_authority_sha256:current.plan_authority_sha256,
+    verification_plan_sha256:fields.verification_plan_sha256,
+    gate_results:structuredClone(gateResults),
+    functional_receipts:functional,completion_operation_id:id,
+    receipt_sha256:null};
+  receipt.receipt_sha256=releaseReceiptDigest(receipt);
+  const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
   const project=transaction.projectCapabilityFor(stateCapability);
   const existing=await journal.resumeOperation({projectCapability:project,
     operationId:id,sessionId:sid,kind:'release-verification-complete'}).catch(
       (error)=>{if(error.code==='operation-not-found')return null;throw error;});
   if(existing?.stage==='completed-ledger'){
-    const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
-    if(fs.existsSync(path.join(stateCapability.projectRoot,...relative.split('/')))){
-      const stored=readCanonical(path.join(stateCapability.projectRoot,
-        ...relative.split('/')),'release-verification-receipt').value;
-      if(stored.status==='invalidated')
-        fail('release-verification-recovery-required');
+    const receiptPath=path.join(stateCapability.projectRoot,...relative.split('/'));
+    if(!fs.existsSync(receiptPath))fail('release-verification-recovery-required');
+    const raw=readCanonical(receiptPath,'release-verification-adoption').value;
+    if(raw.status==='invalidated')fail('release-verification-recovery-required');
+    let stored;
+    try{stored=validateReleaseVerificationReceipt(raw);}catch{
+      fail('release-verification-adoption');
     }
+    if(canonical(stored)!==canonical(receipt))fail('release-verification-adoption');
+    validateReleaseCompletionLedger(existing,{sliceId,receiptRelative:relative,
+      receipt,operationId:id});
     return{...existing.result,operation_id:id,
       operation_receipt:existing,adopted:true};
   }
@@ -1202,14 +1250,6 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     preconditions});
   await journal.recordOperationStage(operation,'aggregate-authenticated',{owned:{
     gateCount:gateResults.length,functionalCount:functional.length}});
-  const receipt={schema_version:1,slice_id:sliceId,
-    plan_authority_sha256:current.plan_authority_sha256,
-    verification_plan_sha256:fields.verification_plan_sha256,
-    gate_results:structuredClone(gateResults),
-    functional_receipts:functional,completion_operation_id:id,
-    receipt_sha256:null};
-  receipt.receipt_sha256=releaseReceiptDigest(receipt);
-  const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
   seam?.('before-release-receipt-write',{operationId:id,path:relative});
   const replaced=await replaceInvalidatedReleaseReceipt({stateCapability,
     current,fields,sliceId,relative,receipt});
@@ -1247,5 +1287,7 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   publishCommandGateResult,
   publishReleaseIntegrityGateResult,
   gateResultRefs,validateReleaseVerificationReceipt,
-  isInvalidatedReleaseReceipt,releaseReceiptTargetLocks,
+  reconstructInvalidatedReleaseReceipt,isInvalidatedReleaseReceipt,
+  validateReleaseCompletionLedger,replaceInvalidatedReleaseReceipt,
+  releaseReceiptTargetLocks,
   publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};

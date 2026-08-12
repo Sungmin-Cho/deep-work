@@ -3,7 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { validatePlanScopeV1, canonicalizePlanScopeV1, deriveScopedWriteAuthority } =
+const { validatePlanScopeV1, canonicalizePlanScopeV1, deriveScopedWriteAuthority,
+  CLASS_FIELD } =
   require('./plan-runtime.js');
 const { compilePlanProjectionV1, compileImmutablePlanAuthorityV2 } = require('./plan-runtime.js');
 const { specContractDigest } = require('./contract-runtime.js');
@@ -76,6 +77,14 @@ test('inline authority is the intersection of class paths and slice union', () =
   assert.deepEqual(authority.authorized_paths, ['tests/a.test.js']);
   assert.equal(authority.cluster_id, null);
   assert.match(authority.sha256, /^[0-9a-f]{64}$/);
+});
+
+test('write-class authority uses the persisted failing_test carrier key',()=>{
+  assert.deepEqual(CLASS_FIELD,{
+    'failing-test':'failing_test',production:'production',refactor:'refactor'});
+  const authority=deriveScopedWriteAuthority({plan,sliceId:'SLICE-001',
+    writeClass:'failing-test'});
+  assert.deepEqual(authority.class_paths,['tests/a.test.js']);
 });
 
 test('delegation assignment is an exact partition of the locked plan', () => {

@@ -147,12 +147,33 @@ test('ReleaseVerificationReceiptV1 rejects content changed after publication',()
   /release-verification-receipt/);
 });
 
-test('invalidated release receipts accept only native numeric v1 shape and use ranked target locks',(t)=>{
-  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:1,
-    status:'invalidated'}),true);
-  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:'1.0',
-    status:'invalidated'}),true);
+test('invalidated release receipts require authenticated native or legacy v1 identity and use ranked target locks',(t)=>{
+  const native={schema_version:1,slice_id:'SLICE-001',
+    plan_authority_sha256:'1'.repeat(64),verification_plan_sha256:'2'.repeat(64),
+    gate_results:[{gate_id:'GATE-full-relevant-suite',
+      operation_id:`op-${'3'.repeat(64)}`,
+      result_path:`.deep-work/s-aaaaaaaa/gate-results/op-${'3'.repeat(64)}.json`,
+      result_sha256:'4'.repeat(64),ledger_result_sha256:'5'.repeat(64),
+      checker_id:'command-v1',argv_sha256:gate.argvSha256(['npm','test'])}],
+    functional_receipts:[],completion_operation_id:`op-${'6'.repeat(64)}`,
+    receipt_sha256:null};
+  native.receipt_sha256=journal.sha256(journal.canonicalJson(
+    Object.fromEntries(Object.entries(native).filter(([key])=>
+      key!=='receipt_sha256'))));
+  const invalidated={...native,status:'invalidated'};
+  assert.equal(gate.isInvalidatedReleaseReceipt(invalidated),true);
+  assert.deepEqual(gate.reconstructInvalidatedReleaseReceipt(invalidated),native);
+  const legacy={...invalidated,schema_version:'1.0',estimated_cost:null,
+    git_after:'',git_before:'',goal:'',model_auto_selected:false,
+    model_override_reason:null,model_used:'unknown',tdd_mode:'strict',
+    worktree_branch:''};
+  assert.equal(gate.isInvalidatedReleaseReceipt(legacy),true);
+  assert.deepEqual(gate.reconstructInvalidatedReleaseReceipt(legacy),native);
+  assert.equal(gate.isInvalidatedReleaseReceipt({...invalidated,
+    receipt_sha256:'0'.repeat(64)}),false);
   assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:2,
+    status:'invalidated'}),false);
+  assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:1,
     status:'invalidated'}),false);
   const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'dw-release-locks-')));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
@@ -166,6 +187,50 @@ test('invalidated release receipts accept only native numeric v1 shape and use r
     .map((row)=>row.capability.path).sort((a,b)=>Buffer.compare(
       Buffer.from(a),Buffer.from(b))));
 });
+
+test('invalidated release replacement verifies the prior digest before atomic adoption',
+  async(t)=>{
+    const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+      'dw-release-recovery-')));
+    t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+    fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+    const sessionId='s-aaaaaaaa',work=path.join(root,'.deep-work',sessionId),
+      receipts=path.join(work,'receipts');fs.mkdirSync(receipts,{recursive:true});
+    const statePath=path.join(root,'.claude',`deep-work.${sessionId}.md`);
+    fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',{
+      session_id:sessionId,work_dir:`.deep-work/${sessionId}`,current_phase:'test'}));
+    const stateCapability=platform.issueProjectStateCapability(root,statePath,
+      {role:'session-state'});
+    const ref={gate_id:'GATE-full-relevant-suite',
+      operation_id:`op-${'3'.repeat(64)}`,
+      result_path:`.deep-work/${sessionId}/gate-results/op-${'3'.repeat(64)}.json`,
+      result_sha256:'4'.repeat(64),ledger_result_sha256:'5'.repeat(64),
+      checker_id:'command-v1',argv_sha256:gate.argvSha256(['npm','test'])};
+    const make=(operationId)=>{
+      const value={schema_version:1,slice_id:'SLICE-001',
+        plan_authority_sha256:'1'.repeat(64),verification_plan_sha256:'2'.repeat(64),
+        gate_results:[ref],functional_receipts:[],completion_operation_id:operationId,
+        receipt_sha256:null};
+      value.receipt_sha256=journal.sha256(journal.canonicalJson(
+        Object.fromEntries(Object.entries(value).filter(([key])=>
+          key!=='receipt_sha256'))));return value;};
+    const prior=make(`op-${'6'.repeat(64)}`),next=make(`op-${'7'.repeat(64)}`);
+    const receiptPath=path.join(receipts,'SLICE-001.json');
+    fs.writeFileSync(receiptPath,journal.canonicalJson({...prior,status:'invalidated'}));
+    const relative=`.deep-work/${sessionId}/receipts/SLICE-001.json`;
+    assert.equal(await gate.replaceInvalidatedReleaseReceipt({stateCapability,
+      current:{plan_authority_sha256:'1'.repeat(64)},
+      fields:{verification_plan_sha256:'2'.repeat(64),work_dir:`.deep-work/${sessionId}`},
+      sliceId:'SLICE-001',relative,receipt:next}),true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(receiptPath,'utf8')),next);
+    fs.writeFileSync(receiptPath,journal.canonicalJson({
+      ...prior,status:'invalidated',receipt_sha256:'0'.repeat(64)}));
+    await assert.rejects(()=>gate.replaceInvalidatedReleaseReceipt({stateCapability,
+      current:{plan_authority_sha256:'1'.repeat(64)},
+      fields:{verification_plan_sha256:'2'.repeat(64),work_dir:`.deep-work/${sessionId}`},
+      sliceId:'SLICE-001',relative,receipt:next}),
+    /release-verification-receipt/);
+  });
 
 test('gate-fact-publish authenticates catalog inputs and adopts exact fact bytes',
   async(t)=>{
@@ -307,6 +372,26 @@ test('gate-fact-publish authenticates catalog inputs and adopts exact fact bytes
       stateCapability,planCapability,plan:completedPlan,sliceId:'SLICE-001',
       gateResults:result.gate_result_refs,functionalReceipts:[]});
     assert.equal(completionReplay.adopted,true);
+    const completedReceiptPath=path.join(root,'.deep-work',sessionId,
+      'receipts','SLICE-001.json');
+    const completedReceiptBytes=fs.readFileSync(completedReceiptPath);
+    fs.unlinkSync(completedReceiptPath);
+    await assert.rejects(()=>gate.publishReleaseVerificationReceipt({
+      stateCapability,planCapability,plan:completedPlan,sliceId:'SLICE-001',
+      gateResults:result.gate_result_refs,functionalReceipts:[]}),
+    /release-verification-recovery-required/);
+    fs.writeFileSync(completedReceiptPath,completedReceiptBytes);
+    const forged=JSON.parse(completedReceiptBytes);
+    forged.completion_operation_id=`op-${'f'.repeat(64)}`;
+    forged.receipt_sha256=journal.sha256(journal.canonicalJson(
+      Object.fromEntries(Object.entries(forged).filter(([key])=>
+        key!=='receipt_sha256'))));
+    fs.writeFileSync(completedReceiptPath,journal.canonicalJson(forged));
+    await assert.rejects(()=>gate.publishReleaseVerificationReceipt({
+      stateCapability,planCapability,plan:completedPlan,sliceId:'SLICE-001',
+      gateResults:result.gate_result_refs,functionalReceipts:[]}),
+    /release-verification-adoption/);
+    fs.writeFileSync(completedReceiptPath,completedReceiptBytes);
   });
 
 test('release integrity rejects a caller-authored empty external-operation index',

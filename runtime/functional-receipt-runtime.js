@@ -204,12 +204,15 @@ function validateFunctionalCompletionLedger(completed,{sessionId,sliceId,
     fail(code);
   return result;
 }
-function reconstructInvalidatedFunctionalReceipt({legacy,sliceId,
+function reconstructInvalidatedFunctionalReceipt({legacy,sessionId,sliceId,
   plan,verificationPlanSha256}={}){
   if(!legacy||legacy.schema_version!==2||legacy.status!=='invalidated'||
+      !/^s-[0-9a-f]{8}$/.test(sessionId||'')||
       legacy.slice_id!==sliceId||legacy.slice_kind!=='functional'||
       legacy.plan_authority_sha256!==plan.plan_authority_sha256||
-      legacy.verification_plan_sha256!==verificationPlanSha256)
+      legacy.verification_plan_sha256!==verificationPlanSha256||
+      legacy.red_proof_ref!==`.deep-work/${sessionId}/red-proofs/${
+        legacy.red_proof_sha256}.json`)
     fail('functional-recovery-receipt');
   let receipt;try{const candidate=structuredClone(legacy);delete candidate.status;
     receipt=validateFunctionalSliceReceiptV2(candidate);}catch{fail('functional-recovery-receipt');}
@@ -393,8 +396,11 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   const receiptRelative=`.deep-work/${sid}/receipts/${sliceId}.json`;
   const receiptPath=path.join(root,...receiptRelative.split('/'));
   if(completed?.stage==='completed-ledger'){
-    const stored=validateFunctionalSliceReceiptV2(readCanonical(receiptPath,
-      'functional-receipt-adoption').value);
+    const storedRaw=readCanonical(receiptPath,
+      'functional-receipt-adoption').value;
+    if(storedRaw.status==='invalidated')
+      fail('functional-recovery-fresh-evidence');
+    const stored=validateFunctionalSliceReceiptV2(storedRaw);
     if(canonicalJson(stored)!==canonicalJson(receipt))
       fail('functional-completion-ledger');
     const result=validateFunctionalCompletionLedger(completed,{sessionId:sid,

@@ -28,7 +28,11 @@ test('evidence admission pseudo-gates require their exact positive predicates',(
     redaction:{passed:true}},base),[
     'GATE-evidence-completeness','GATE-redaction','GATE-targeted-tests']);
   assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:false,
-    redaction:{passed:false}},base),base);
+    redaction:{passed:false}},base,{humanAckSatisfied:true}),[
+    'GATE-human-ack','GATE-targeted-tests']);
+  assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:true,
+    redaction:{passed:true}},[],{humanAckSatisfied:false}),[
+    'GATE-evidence-completeness','GATE-redaction']);
 });
 
 test('no-plan projection has exact defaults and only compatibility plus gate blockers',()=>{
@@ -188,8 +192,6 @@ x
   assert.equal(testAdmission.required_gate_ids.includes('GATE-redaction'),true);
   assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-evidence-completeness'),true);
   assert.equal(testAdmission.satisfied_gate_ids.includes('GATE-redaction'),true);
-  evidenceRuntime.loadCommittedPackage=originalLoadCommittedPackage;
-  evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluateEvidenceCompleteness;
   let admission=selectGovernedAdmission(
     loadGovernedContext({stateCapability}).projection,'finish-finalize');
   assert.equal(admission.blocking_codes.includes('human-ack-missing'),true);
@@ -204,6 +206,10 @@ x
     loadGovernedContext({stateCapability}).projection,'finish-finalize');
   assert.equal(admission.blocking_codes.includes('human-ack-missing'),false);
   assert.equal(admission.blocking_codes.includes('external-change-lock'),false);
+  assert.equal(admission.blocking_codes.includes('gate-missing'),false);
+  assert.equal(admission.satisfied_gate_ids.includes('GATE-human-ack'),true);
+  evidenceRuntime.loadCommittedPackage=originalLoadCommittedPackage;
+  evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluateEvidenceCompleteness;
 
   const governed=loadGovernedContext({stateCapability});
   assert.deepEqual(reportRuntime.readReceiptDashboard({stateCapability}),

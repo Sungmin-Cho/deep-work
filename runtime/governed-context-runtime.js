@@ -19,10 +19,11 @@ function exactKeys(value,keys){return value&&typeof value==='object'&&!Array.isA
   canonicalJson(Object.keys(value).sort())===canonicalJson([...keys].sort());}
 function sorted(values){return [...new Set(values||[])].sort((a,b)=>
   Buffer.compare(Buffer.from(a),Buffer.from(b)));}
-function deriveAdmissionSatisfiedGateIds(summary,satisfied=[]){
+function deriveAdmissionSatisfiedGateIds(summary,satisfied=[],{humanAckSatisfied=false}={}){
   const projected=[...satisfied];
   if(summary?.complete===true)projected.push('GATE-evidence-completeness');
   if(summary?.redaction?.passed===true)projected.push('GATE-redaction');
+  if(humanAckSatisfied===true)projected.push('GATE-human-ack');
   return sorted(projected);
 }
 function exactSorted(values){return Array.isArray(values)&&
@@ -394,6 +395,11 @@ function loadGovernedContext({stateCapability}={}){
   const invalidations=storedInvalidations.map((row)=>{
     const copy=structuredClone(row);delete copy.schema_version;return copy;});
   if(activeReplan)warnings.push('invalidation-active');
+  const humanAckRequired=verificationPlan?.risk_class==='critical';
+  const hasRequiredHumanAck=Object.values(reviewExecution.points||{}).some((point)=>
+    point?.human_ack?.required===true);
+  const humanAckSatisfied=!humanAckRequired||hasRequiredHumanAck&&
+    reviewGate.blocking.missing_acks.length===0;
   let evidence={status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
     invalidated_ids:[]},satisfied=[],admissionSatisfied=[],evidenceSummary=null;
   if(verificationPlan){
@@ -407,7 +413,8 @@ function loadGovernedContext({stateCapability}={}){
           {artifactRoot:workDir});
         evidenceSummary=summary;
         satisfied=sorted(summary.satisfied_gate_ids);
-        admissionSatisfied=deriveAdmissionSatisfiedGateIds(summary,satisfied);
+        admissionSatisfied=deriveAdmissionSatisfiedGateIds(summary,satisfied,
+          {humanAckSatisfied});
         evidence={status:summary.complete?'complete':'incomplete',
           required_ids:sorted(verificationPlan.evidence_required_gate_ids),
           completed_ids:satisfied,missing_ids:sorted(summary.missing_gate_ids),
@@ -450,15 +457,11 @@ function loadGovernedContext({stateCapability}={}){
   const requiredByPoint=Object.fromEntries(POINTS.map((point)=>[point,verificationPlan?
     policy.requiredGateIds(verificationPlan,{at:point==='test'?'test':'finish'}):[]]));
   const satisfiedByPoint=Object.fromEntries(POINTS.map((point)=>[point,admissionSatisfied]));
-  const humanAckRequired=verificationPlan?.risk_class==='critical';
-  const hasRequiredHumanAck=Object.values(reviewExecution.points||{}).some((point)=>
-    point?.human_ack?.required===true);
   const built=buildProgressProjectionV1({plan_identity:planIdentity,evidence,
     residual_risk:residualRisk,replan,invalidations,findings,receipts,
     required_gates_by_point:requiredByPoint,satisfied_gates_by_point:satisfiedByPoint,
     warnings:sorted(warnings),human_ack_required:humanAckRequired,
-    human_ack_satisfied:!humanAckRequired||hasRequiredHumanAck&&
-      reviewGate.blocking.missing_acks.length===0,
+    human_ack_satisfied:humanAckSatisfied,
     external_change_lock:reviewGate.blocking.external_change_lock,
     redaction_failed:warnings.includes('evidence-pointer-stale')});
   return{...built,plan,verificationPlan,sessionId:sid,workDir};
