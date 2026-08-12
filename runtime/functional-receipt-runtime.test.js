@@ -4,7 +4,8 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateRefactorEvidenceV1,semanticDigest,
-  buildFunctionalReceiptTargetLocks}=require('./functional-receipt-runtime.js');
+  buildFunctionalReceiptTargetLocks,reconstructInvalidatedFunctionalReceipt,
+  functionalRecoveryOperationId}=require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
 const ref=(char)=>({operation_id:op(char),
@@ -55,6 +56,22 @@ function assertSwappedAuthorityRejected(){
   assert.throws(()=>validateFunctionalSliceReceiptV2(proof),
     /functional-receipt-digest/);
 }
+test('invalidated legacy functional receipts reconstruct only their original v2 identity',()=>{
+  const original=receipt();
+  const legacy={...original,schema_version:'1.0',status:'invalidated'};
+  const reconstructed=reconstructInvalidatedFunctionalReceipt({legacy,
+    sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
+    plan:{plan_authority_sha256:original.plan_authority_sha256},
+    verificationPlanSha256:original.verification_plan_sha256});
+  assert.deepEqual(reconstructed,original);
+  assert.match(functionalRecoveryOperationId({sessionId:'s-aaaaaaaa',
+    sliceId:'SLICE-001',receipt:original}),/^op-[0-9a-f]{64}$/);
+  assert.throws(()=>reconstructInvalidatedFunctionalReceipt({
+    legacy:{...legacy,receipt_sha256:'0'.repeat(64)},sessionId:'s-aaaaaaaa',
+    sliceId:'SLICE-001',plan:{plan_authority_sha256:original.plan_authority_sha256},
+    verificationPlanSha256:original.verification_plan_sha256}),
+  /functional-recovery-receipt/);
+});
 test('functional receipt target locks follow capability path byte order',()=>{
   assertDeterministicCompletionIdentity();
   assertDuplicateSensorAuthorityRejected();

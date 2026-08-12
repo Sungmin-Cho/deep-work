@@ -81,7 +81,7 @@ async function acceptedWrite({stateCapability,plan,sliceId,fields,expectedOutcom
   }catch{fail('verification-v2-write');}
   const planSha256=planRuntime.canonicalizePlanScopeV1(plan).sha256;
   const slice=plan.slices.find((row)=>row.id===sliceId);
-  const field={failing_test:'failing_test',production:'production',
+  const field={'failing-test':'failing_test',production:'production',
     refactor:'refactor'}[receipt.writeClass];
   const authority=receipt.authority;
   const allPlanFiles=new Set(plan.slices.flatMap((row)=>row.files||[]));

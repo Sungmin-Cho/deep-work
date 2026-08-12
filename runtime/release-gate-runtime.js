@@ -432,6 +432,45 @@ function writeExclusive(file,value,code){
   if(!fs.readFileSync(file).equals(bytes))fail(code);
   return journal.sha256(bytes);
 }
+async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
+  sliceId,relative,receipt}={}){
+  const root=stateCapability.projectRoot,file=path.join(root,...relative.split('/'));
+  if(!fs.existsSync(file))return false;
+  const existing=readCanonical(file,'release-verification-receipt').value;
+  if(existing.schema_version!=='1.0'||existing.status!=='invalidated')return false;
+  if(existing.slice_id!==sliceId||
+      existing.plan_authority_sha256!==current.plan_authority_sha256||
+      existing.verification_plan_sha256!==fields.verification_plan_sha256||
+      !OPERATION.test(existing.completion_operation_id||'')||
+      !DIGEST.test(existing.receipt_sha256||'')||
+      !Array.isArray(existing.gate_results)||
+      !Array.isArray(existing.functional_receipts))
+    fail('release-verification-receipt');
+  const sid=transaction.sessionIdFromState(stateCapability),project=
+    transaction.projectCapabilityFor(stateCapability);
+  const parent=await journal.resumeOperation({projectCapability:project,
+    operationId:existing.completion_operation_id,sessionId:sid,
+    kind:'release-verification-complete'}).catch((error)=>{
+      if(error.code==='operation-not-found')return null;throw error;});
+  const result=parent?.result;
+  if(parent?.stage!=='completed-ledger'||!exactKeys(result,
+      ['slice_id','receipt_path','receipt_sha256','post_state_sha256'])||
+      result.slice_id!==sliceId||result.receipt_path!==relative||
+      result.receipt_sha256!==existing.receipt_sha256||
+      !DIGEST.test(result.post_state_sha256||'')||
+      parent.resultSha256!==journal.sha256(canonical(result)))
+    fail('release-verification-receipt');
+  const nextBytes=Buffer.from(canonical(receipt));
+  const workDir=path.join(root,...String(fields.work_dir).split('/'));
+  const sessionCapability=platform.issueProjectStateCapability(root,workDir,
+    {role:'session-work-dir',sessionStateCapability:stateCapability});
+  const capability=transaction.issueSessionFileCapability({sessionCapability,
+    candidate:file,allowedBasenames:[path.basename(file)],
+    role:'release-verification-receipt'});
+  transaction.atomicWriteSessionFile(capability,nextBytes);
+  if(!fs.readFileSync(file).equals(nextBytes))fail('release-verification-receipt');
+  return true;
+}
 function loadPlan(planCapability,plan){
   transaction.revalidateSessionFile(planCapability);
   let current;try{current=JSON.parse(transaction.readSessionFile(planCapability));}
@@ -1114,8 +1153,17 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
   const existing=await journal.resumeOperation({projectCapability:project,
     operationId:id,sessionId:sid,kind:'release-verification-complete'}).catch(
       (error)=>{if(error.code==='operation-not-found')return null;throw error;});
-  if(existing?.stage==='completed-ledger')return{...existing.result,
-    operation_id:id,operation_receipt:existing,adopted:true};
+  if(existing?.stage==='completed-ledger'){
+    const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
+    if(fs.existsSync(path.join(stateCapability.projectRoot,...relative.split('/')))){
+      const stored=readCanonical(path.join(stateCapability.projectRoot,
+        ...relative.split('/')),'release-verification-receipt').value;
+      if(stored.status==='invalidated')
+        fail('release-verification-recovery-required');
+    }
+    return{...existing.result,operation_id:id,
+      operation_receipt:existing,adopted:true};
+  }
   if(slice.checked)fail('release-verification-state');
   const operation=await journal.beginOperation({projectCapability:project,
     sessionId:sid,kind:'release-verification-complete',operationId:id,
@@ -1131,8 +1179,10 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
   receipt.receipt_sha256=releaseReceiptDigest(receipt);
   const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
   seam?.('before-release-receipt-write',{operationId:id,path:relative});
-  writeExclusive(path.join(stateCapability.projectRoot,...relative.split('/')),
-    receipt,'release-verification-receipt');
+  const replaced=await replaceInvalidatedReleaseReceipt({stateCapability,
+    current,fields,sliceId,relative,receipt});
+  if(!replaced)writeExclusive(path.join(stateCapability.projectRoot,
+    ...relative.split('/')),receipt,'release-verification-receipt');
   await journal.recordOperationStage(operation,'receipt-published',{owned:{
     receiptPath:relative,receiptSha256:receipt.receipt_sha256}});
   const updated=structuredClone(current);
