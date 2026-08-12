@@ -15,17 +15,27 @@ const {compileImmutablePlanAuthorityV2}=require('./plan-runtime.js');
 const {loadGovernedContext}=require('./governed-context-runtime.js');
 const {dispatch}=require('../scripts/deep-work-runtime.js');
 
-test('release gate catalog fixes all command argv and every v6.14 gate exactly once',()=>{
+test('release gate catalog fixes all command argv and every release gate exactly once',()=>{
   assert.deepEqual(Object.keys(gate.RELEASE_GATE_CATALOG),
-    ['carrier','tdd','replan','integration','full','pack']);
+    ['carrier','tdd','replan','integration','targeted','full','pack']);
+  assert.deepEqual(gate.RELEASE_GATE_CATALOG.targeted.argv,['node','--test',
+    'runtime/functional-receipt-runtime.test.js',
+    'tests/context-engineering-context-contract.test.js',
+    'tests/context-engineering-receipt-contract.test.js',
+    'tests/skill-reference-integrity.test.js']);
+  assert.deepEqual(gate.RELEASE_GATE_CATALOG.targeted.gate_ids,[
+    'GATE-context-contract','GATE-receipt-lock-order',
+    'GATE-reference-integrity','GATE-targeted-tests']);
   assert.deepEqual(gate.RELEASE_GATE_CATALOG.full.argv,['npm','test']);
+  assert.deepEqual(gate.RELEASE_GATE_CATALOG.full.gate_ids,
+    ['GATE-full-relevant-suite','GATE-full-suite']);
   assert.deepEqual(gate.RELEASE_GATE_CATALOG.pack.argv,
     ['npm','pack','--dry-run','--json']);
   const ids=Object.values(gate.RELEASE_GATE_CATALOG)
     .flatMap((row)=>row.gate_ids)
     .concat(Object.values(gate.DETERMINISTIC_GATE_MAPPING).flat());
   assert.equal(new Set(ids).size,ids.length);
-  assert.equal(ids.length,32);
+  assert.equal(ids.length,36);
 });
 
 test('GateFactArtifactV1 separates semantic facts and raw artifact digests',()=>{
@@ -59,6 +69,15 @@ test('deterministic fact validators emit only their closed blocker vocabulary',(
     ['external-effect-seen','version-mismatch']);
   assert.throws(()=>gate.computeBlockingCodes('release-integrity-v1',{
     ...integrity,caller_note:'forged'}),/release-gate-facts/);
+});
+
+test('release integrity treats v7 surfaces as active after the v7 migration',()=>{
+  const versions=[['.claude-plugin/plugin.json','7.1.4'],
+    ['.codex-plugin/plugin.json','6.14.0'],['package.json','6.14.0']];
+  assert.deepEqual(gate.legacyV7SurfaceViolations({
+    activeVersion:'7.1.4',versions}),[]);
+  assert.deepEqual(gate.legacyV7SurfaceViolations({
+    activeVersion:'6.14.0',versions}),['.claude-plugin/plugin.json']);
 });
 
 test('CheckerInputCatalogV1 rejects wrong roles, duplicates, and caller ordering',()=>{

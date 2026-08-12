@@ -8,6 +8,10 @@ const path=require('node:path');
 const gate=require('./release-gate-runtime.js');
 const toolchain=require('./release-toolchain-runtime.js');
 
+test('full release gate timeout budget covers hermetic suite overhead',()=>{
+  assert.ok(toolchain.COMMAND_TIMEOUT_LIMITS.full>=900000);
+});
+
 test('ReleaseToolIdentityV1 binds the active Node executable physical identity',()=>{
   const identity=toolchain.buildToolIdentity({name:'node',
     targetPath:process.execPath});

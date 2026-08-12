@@ -8,7 +8,8 @@ const journal=require('./operation-journal.js');
 const DIGEST=/^[0-9a-f]{64}$/;
 const OPERATION=/^op-[0-9a-f]{64}$/;
 const COMMAND_TIMEOUT_LIMITS=Object.freeze({carrier:120000,tdd:120000,
-  replan:120000,integration:120000,full:480000,pack:120000});
+  replan:120000,integration:120000,targeted:120000,full:900000,
+  pack:120000});
 function fail(code,message=code){const error=new Error(`[${code}] ${message}`);
   error.code=code;throw error;}
 function canonical(value){return journal.canonicalJson(value);}
@@ -567,6 +568,7 @@ function authenticateReleaseSourceGraphRef({stateCapability,ref}={}){
 }
 
 module.exports={canonical,sha256,buildToolIdentity,validateToolIdentity,
+  COMMAND_TIMEOUT_LIMITS,
   resolveReleaseToolIdentities,resolveOptionalReleaseToolIdentities,
   commandRootRow,compareGraphRows,buildReleaseSourceGraph,
   validateReleaseSourceGraph,buildToolchainManifest,validateToolchainManifest,

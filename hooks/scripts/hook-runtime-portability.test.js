@@ -690,7 +690,7 @@ test('PostToolUse registered command forwards identical input to both real adapt
   fs.copyFileSync(path.join(__dirname, 'hook-shell-adapter.js'),
     path.join(scripts, 'hook-shell-adapter.js'));
   fs.writeFileSync(path.join(scripts, 'file-tracker.sh'),
-    '#!/bin/sh\ndd of="$TRACKER_DUMP" status=none\n');
+    '#!/bin/sh\nnode -e "require(\'node:fs\').writeFileSync(process.env.TRACKER_DUMP, require(\'node:fs\').readFileSync(0))"\n');
   fs.writeFileSync(path.join(scripts, 'phase-transition.sh'),
     '#!/bin/sh\nprintf %s "$CLAUDE_TOOL_INPUT" > "$TRANSITION_DUMP"\n');
   const trackerDump = path.join(fixture.base, 'tracker.bin');

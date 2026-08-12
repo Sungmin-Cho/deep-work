@@ -39,7 +39,7 @@ const RELEASE_GATE_CATALOG=Object.freeze({
     'runtime/verification-runtime.test.js','runtime/phase-runtime.test.js',
     'runtime/slice-runtime.test.js','hooks/scripts/verify-receipt-core.test.js']),
   gate_ids:Object.freeze(['GATE-negative-tests','GATE-permission-negative',
-    'GATE-receipt-completeness','GATE-targeted-tests','GATE-tdd-green',
+    'GATE-receipt-completeness','GATE-tdd-green',
     'GATE-tdd-red'])}),
   replan:Object.freeze({argv:Object.freeze(['node','--test',
     'runtime/phase-runtime.test.js','runtime/slice-runtime.test.js',
@@ -52,8 +52,15 @@ const RELEASE_GATE_CATALOG=Object.freeze({
     'tests/v6.13-spec-evidence-integration.test.js']),
   gate_ids:Object.freeze(['GATE-e2e-entrypoint','GATE-host-smoke',
     'GATE-relevant-integration'])}),
+  targeted:Object.freeze({argv:Object.freeze(['node','--test',
+    'runtime/functional-receipt-runtime.test.js',
+    'tests/context-engineering-context-contract.test.js',
+    'tests/context-engineering-receipt-contract.test.js',
+    'tests/skill-reference-integrity.test.js']),
+  gate_ids:Object.freeze(['GATE-context-contract','GATE-receipt-lock-order',
+    'GATE-reference-integrity','GATE-targeted-tests'])}),
   full:Object.freeze({argv:Object.freeze(['npm','test']),
-    gate_ids:Object.freeze(['GATE-full-relevant-suite'])}),
+    gate_ids:Object.freeze(['GATE-full-relevant-suite','GATE-full-suite'])}),
   pack:Object.freeze({argv:Object.freeze(['npm','pack','--dry-run','--json']),
     gate_ids:Object.freeze(['GATE-fresh-install-build'])}),
 });
@@ -737,6 +744,14 @@ function releaseDocsRulePath(root,toolchain){
   if(!fs.existsSync(fallback))fail('release-integrity-docs-rule');
   return fallback;
 }
+function legacyV7SurfaceViolations({activeVersion,versions}={}){
+  const activeMajor=Number.parseInt(String(activeVersion).split('.')[0],10);
+  if(!Number.isSafeInteger(activeMajor)||activeMajor>=7||!Array.isArray(versions))
+    return[];
+  return versions.filter(([,version])=>/^7\./.test(String(version)))
+    .map(([file])=>file).sort((a,b)=>Buffer.compare(Buffer.from(a),
+      Buffer.from(b)));
+}
 function releaseIntegrityValues({stateCapability}={}){
   const root=stateCapability.projectRoot;
   const toolchain=require('./release-toolchain-runtime.js');
@@ -761,9 +776,7 @@ function releaseIntegrityValues({stateCapability}={}){
   if(!/^[0-9a-f]{40}$/.test(head)||!branch)fail('release-integrity-git');
   const versions=[['.claude-plugin/plugin.json',claude.version],
     ['.codex-plugin/plugin.json',codex.version],['package.json',pkg.version]];
-  const v7=versions.filter(([,version])=>/^7\./.test(String(version)))
-    .map(([file])=>file).sort((a,b)=>Buffer.compare(Buffer.from(a),
-      Buffer.from(b)));
+  const v7=legacyV7SurfaceViolations({activeVersion:pkg.version,versions});
   const external=journal.inspectExternalEffectOperationIds({
     projectCapability:transaction.projectCapabilityFor(stateCapability),
     sessionId:transaction.sessionIdFromState(stateCapability)});
@@ -1152,4 +1165,4 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   publishCommandGateResult,
   publishReleaseIntegrityGateResult,
   gateResultRefs,validateReleaseVerificationReceipt,
-  publishReleaseVerificationReceipt,semanticDigest};
+  publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};
