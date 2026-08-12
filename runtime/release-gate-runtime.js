@@ -14,9 +14,11 @@ const OPERATION=/^op-[0-9a-f]{64}$/;
 const RELEASE_RECEIPT_KEYS=['schema_version','slice_id','plan_authority_sha256',
   'verification_plan_sha256','gate_results','functional_receipts',
   'completion_operation_id','receipt_sha256'];
-const LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS=[...RELEASE_RECEIPT_KEYS,
+const LEGACY_RELEASE_RECEIPT_KEYS=[...RELEASE_RECEIPT_KEYS,
   'estimated_cost','git_after','git_before','goal','model_auto_selected',
-  'model_override_reason','model_used','status','tdd_mode','worktree_branch'];
+  'model_override_reason','model_used','tdd_mode','worktree_branch'];
+const LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS=[...LEGACY_RELEASE_RECEIPT_KEYS,
+  'status'];
 const SEMVER=/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 function fail(code,message=code){const error=new Error(`[${code}] ${message}`);
   error.code=code;throw error;}
@@ -429,6 +431,13 @@ function readCanonical(file,code){
   if(!bytes.equals(Buffer.from(canonical(value))))fail(code);
   return{value,bytes,sha256:journal.sha256(bytes)};
 }
+function readReleaseReceipt(file,code){
+  let stat,bytes,value;try{stat=fs.lstatSync(file);bytes=fs.readFileSync(file);
+    value=JSON.parse(bytes);}catch{fail(code);}
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)
+    fail(code);
+  return{value,bytes,sha256:journal.sha256(bytes)};
+}
 function writeExclusive(file,value,code){
   const bytes=Buffer.from(canonical(value));fs.mkdirSync(path.dirname(file),{recursive:true});
   let fd;try{fd=fs.openSync(file,fs.constants.O_CREAT|fs.constants.O_EXCL|
@@ -453,7 +462,7 @@ async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
   sliceId,relative,receipt}={}){
   const root=stateCapability.projectRoot,file=path.join(root,...relative.split('/'));
   if(!fs.existsSync(file))return false;
-  const existingRecord=readCanonical(file,'release-verification-receipt');
+  const existingRecord=readReleaseReceipt(file,'release-verification-receipt');
   const rawExisting=existingRecord.value;
   if(rawExisting.status!=='invalidated')return false;
   let existing;
@@ -1155,6 +1164,23 @@ function reconstructInvalidatedReleaseReceipt(value){
     fail('release-verification-recovery');
   return candidate;
 }
+function normalizeReleaseVerificationReceipt(value){
+  if(value?.status==='invalidated')return reconstructInvalidatedReleaseReceipt(value);
+  let candidate;
+  if(value?.schema_version===1&&exactKeys(value,RELEASE_RECEIPT_KEYS))
+    candidate=structuredClone(value);
+  else if(value?.schema_version==='1.0'&&
+      exactKeys(value,LEGACY_RELEASE_RECEIPT_KEYS)){
+    candidate=Object.fromEntries(RELEASE_RECEIPT_KEYS.map((key)=>
+      [key,value[key]]));candidate.schema_version=1;
+  }else fail('release-verification-receipt');
+  try{validateReleaseVerificationReceipt(candidate);}catch{
+    fail('release-verification-receipt');
+  }
+  if(candidate.receipt_sha256!==value.receipt_sha256)
+    fail('release-verification-receipt');
+  return candidate;
+}
 function isInvalidatedReleaseReceipt(value){
   try{reconstructInvalidatedReleaseReceipt(value);return true;}catch{return false;}
 }
@@ -1232,10 +1258,10 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
   if(existing?.stage==='completed-ledger'){
     const receiptPath=path.join(stateCapability.projectRoot,...relative.split('/'));
     if(!fs.existsSync(receiptPath))fail('release-verification-recovery-required');
-    const raw=readCanonical(receiptPath,'release-verification-adoption').value;
+    const raw=readReleaseReceipt(receiptPath,'release-verification-adoption').value;
     if(raw.status==='invalidated')fail('release-verification-recovery-required');
     let stored;
-    try{stored=validateReleaseVerificationReceipt(raw);}catch{
+    try{stored=normalizeReleaseVerificationReceipt(raw);}catch{
       fail('release-verification-adoption');
     }
     if(canonical(stored)!==canonical(receipt))fail('release-verification-adoption');
@@ -1287,7 +1313,8 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   publishCommandGateResult,
   publishReleaseIntegrityGateResult,
   gateResultRefs,validateReleaseVerificationReceipt,
-  reconstructInvalidatedReleaseReceipt,isInvalidatedReleaseReceipt,
+  reconstructInvalidatedReleaseReceipt,normalizeReleaseVerificationReceipt,
+  isInvalidatedReleaseReceipt,
   validateReleaseCompletionLedger,replaceInvalidatedReleaseReceipt,
   releaseReceiptTargetLocks,
   publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};

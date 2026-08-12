@@ -195,6 +195,7 @@ Phase 1의 `unresolved_required_issues` 확인. 있으면 AskUserQuestion으로 
    - `implement_completed_at: null` 설정 (Implement skill 완료-Marker branch가 발동하지 않도록)
    - 실패한 slice의 `[x]` 체크마크를 `[ ]`로 해제 (Implement skill Section 1 Resume Detection이 미완료 slice로 인식하도록)
    - **동시에** 해당 slice의 receipt에 `status: "invalidated"` 기록 — sensor/verification이 stale evidence를 재사용하지 않고 재구현 시 새 evidence를 생성하도록 보장
+   - 이 checklist 변경만으로는 runtime 권위가 바뀌지 않으므로, 반드시 공개 `test retry`/동등한 journalled route로 `plan.json`의 해당 `checked`도 `false`로 reset한다. 직접 state/plan 파일을 편집해 completion gate를 우회하지 않는다.
    - **주의**: Receipt invalidate만 하고 `[x]`를 그대로 두면 Resume Detection이 미완료 slice를 찾지 못해 재구현이 skip됨. 반드시 둘 다 수행.
 4. 안내:
    - `/deep-test --force-rerun`로 Test phase 직접 재실행 (retry count 초기화)

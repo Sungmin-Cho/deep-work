@@ -85,7 +85,8 @@ async function acceptedWrite({stateCapability,plan,sliceId,fields,expectedOutcom
   const field=CLASS_FIELD[receipt.writeClass];
   const authority=receipt.authority;
   const allPlanFiles=new Set(plan.slices.flatMap((row)=>row.files||[]));
-  const historicalAuthorityValid=explicitOperationId&&field&&authority&&
+  const historicalAuthorityValid=explicitOperationId&&expectedOutcome!=='must-fail'&&
+    field&&authority&&
     authority.schema_version===1&&authority.plan_sha256===receipt.planSha256&&
     authority.slice_id===sliceId&&authority.write_class===receipt.writeClass&&
     canonical(authority.class_paths)===canonical(slice?.write_scope?.[field])&&

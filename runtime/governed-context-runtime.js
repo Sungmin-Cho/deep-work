@@ -236,6 +236,12 @@ function readBoundedCanonical(file,code,max=4_194_304){
   if(!bytes.equals(Buffer.from(canonicalJson(value))))fail(code);
   return value;
 }
+function readBoundedJson(file,code,max=4_194_304){
+  let stat,bytes,value;try{stat=fs.lstatSync(file);bytes=fs.readFileSync(file);
+    value=JSON.parse(bytes);}catch{fail(code);}
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)fail(code);
+  return value;
+}
 function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
   const rows=[];let unknown=false,incomplete=false;
   const transaction=require('./transaction-runtime.js');
@@ -246,12 +252,20 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
     const file=path.join(workDir,'receipts',`${slice.id}.json`);
     let status='pending',receiptSha256=null;
     if(fs.existsSync(file)){
-      let raw;try{raw=readBoundedCanonical(file,'governed-receipt',1_048_576);}
-      catch{raw=null;}
+      let raw,canonicalBytes=true;try{raw=readBoundedCanonical(file,
+        'governed-receipt',1_048_576);}catch{canonicalBytes=false;
+        try{raw=readBoundedJson(file,'governed-receipt',1_048_576);}catch{raw=null;}}
       const value=raw?.payload||raw;
       if(!value){status='unknown';unknown=true;}
-      else if(value.schema_version===2){
-        try{
+      else if(slice.slice_kind==='functional'&&value.status==='invalidated'){
+        try{require('./functional-receipt-runtime.js')
+          .reconstructInvalidatedFunctionalReceipt({legacy:value,sessionId,
+            sliceId:slice.id,plan,verificationPlanSha256:
+              fields.verification_plan_sha256});
+          status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
+        }catch{status='unknown';unknown=true;}
+      }else if(value.schema_version===2){
+        if(!canonicalBytes){status='unknown';unknown=true;}else try{
           const checked=require('./functional-receipt-runtime.js')
             .validateFunctionalSliceReceiptV2(value);
           const relative=path.relative(stateCapability.projectRoot,file)
@@ -278,10 +292,15 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
           status='complete';receiptSha256=checked.receipt_sha256;
         }catch{status='unknown';unknown=true;}
       }else if(slice.slice_kind==='release-verification'&&
-          value.schema_version===1){
+          (value.schema_version===1||value.schema_version==='1.0')){
         try{
-          const checked=require('./release-gate-runtime.js')
-            .validateReleaseVerificationReceipt(value);
+          const releaseRuntime=require('./release-gate-runtime.js');
+          if(releaseRuntime.isInvalidatedReleaseReceipt(value)){
+            status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
+            rows.push({slice_id:slice.id,slice_kind:slice.slice_kind||'functional',
+              status,receipt_sha256:receiptSha256});continue;
+          }
+          const checked=releaseRuntime.normalizeReleaseVerificationReceipt(value);
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -414,7 +433,7 @@ function loadGovernedContext({stateCapability}={}){
         evidenceSummary=summary;
         satisfied=sorted(summary.satisfied_gate_ids);
         admissionSatisfied=deriveAdmissionSatisfiedGateIds(summary,satisfied,
-          {humanAckSatisfied});
+          {humanAckSatisfied:humanAckRequired&&humanAckSatisfied});
         evidence={status:summary.complete?'complete':'incomplete',
           required_ids:sorted(verificationPlan.evidence_required_gate_ids),
           completed_ids:satisfied,missing_ids:sorted(summary.missing_gate_ids),
@@ -496,4 +515,4 @@ function validateSessionAuthority({stateCapability}={}){
 
 module.exports={buildProgressProjectionV1,validateProgressProjectionV1,
   deriveAdmissionSatisfiedGateIds,selectGovernedAdmission,loadGovernedContext,
-  validateSessionAuthority};
+  receiptProjection,validateSessionAuthority};

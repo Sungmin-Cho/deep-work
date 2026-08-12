@@ -221,6 +221,12 @@ function reconstructInvalidatedFunctionalReceipt({legacy,sessionId,sliceId,
     fail('functional-recovery-receipt');
   return receipt;
 }
+function assertFunctionalRecoveryState({target,fields}={}){
+  if(target?.checked===true||fields?.active_slice!==target?.id||
+      fields?.tdd_state!=='SENSOR_CLEAN')
+    fail('functional-recovery-plan-not-reset');
+  return true;
+}
 async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
   const transaction=require('./transaction-runtime.js');
   const root=stateCapability.projectRoot,sid=transaction.sessionIdFromState(stateCapability);
@@ -430,6 +436,7 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     const existing=readCanonical(receiptPath,'functional-receipt-adoption');
     if(!existing.bytes.equals(receiptBytes)){
       if(existing.value.status!=='invalidated')fail('functional-receipt-adoption');
+      assertFunctionalRecoveryState({target,fields});
       let invalidated;
       try{invalidated=reconstructInvalidatedFunctionalReceipt({legacy:existing.value,
         sessionId:sid,sliceId,plan:current,
@@ -496,6 +503,7 @@ module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateFunctionalCompletionLedger,
   reconstructInvalidatedFunctionalReceipt,
+  assertFunctionalRecoveryState,
   authenticateVerificationResultRefV1,authenticateSensorResultRefV1,
   authenticateRedProof,buildFunctionalReceiptTargetLocks,
   publishFunctionalSliceReceiptV2,semanticDigest};

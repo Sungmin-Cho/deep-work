@@ -12,9 +12,10 @@ const {compileImmutablePlanAuthorityV2}=require('./plan-runtime.js');
 const {compileVerificationPlan}=require('./verification-policy-runtime.js');
 const {semanticDigest}=require('./release-gate-runtime.js');
 const {buildProgressProjectionV1,selectGovernedAdmission,loadGovernedContext,
-  validateSessionAuthority,deriveAdmissionSatisfiedGateIds}=
+  validateSessionAuthority,deriveAdmissionSatisfiedGateIds,receiptProjection}=
   require('./governed-context-runtime.js');
 const reportRuntime=require('./report-runtime.js');
+const releaseRuntime=require('./release-gate-runtime.js');
 
 const empty={evidence:{status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
   invalidated_ids:[]},residual_risk:{status:'unknown',class:null,accepted:null,
@@ -33,7 +34,46 @@ test('evidence admission pseudo-gates require their exact positive predicates',(
   assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:true,
     redaction:{passed:true}},[],{humanAckSatisfied:false}),[
     'GATE-evidence-completeness','GATE-redaction']);
+  assert.deepEqual(deriveAdmissionSatisfiedGateIds({complete:true,
+    redaction:{passed:true}},[],{humanAckSatisfied:true}),[
+    'GATE-evidence-completeness','GATE-human-ack','GATE-redaction']);
 });
+
+test('receipt projection classifies authenticated release invalidation as incomplete',
+  (t)=>{
+    const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+      'dw-governed-invalidation-')));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+    fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+    const sessionId='s-aaaaaaaa',work=path.join(root,'.deep-work',sessionId),
+      receipts=path.join(work,'receipts');fs.mkdirSync(receipts,{recursive:true});
+    const statePath=path.join(root,'.claude',`deep-work.${sessionId}.md`);
+    fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',{
+      session_id:sessionId,work_dir:`.deep-work/${sessionId}`,current_phase:'test',
+      verification_plan_sha256:'2'.repeat(64)}));
+    const stateCapability=platform.issueProjectStateCapability(root,statePath,
+      {role:'session-state'});
+    const receipt={schema_version:1,slice_id:'SLICE-001',
+      plan_authority_sha256:'1'.repeat(64),verification_plan_sha256:'2'.repeat(64),
+      gate_results:[{gate_id:'GATE-full-relevant-suite',
+        operation_id:`op-${'3'.repeat(64)}`,
+        result_path:`.deep-work/${sessionId}/gate-results/op-${'3'.repeat(64)}.json`,
+        result_sha256:'4'.repeat(64),ledger_result_sha256:'5'.repeat(64),
+        checker_id:'command-v1',argv_sha256:releaseRuntime.argvSha256(['npm','test'])}],
+      functional_receipts:[],completion_operation_id:`op-${'6'.repeat(64)}`,
+      receipt_sha256:null};
+    receipt.receipt_sha256=journal.sha256(journal.canonicalJson(
+      Object.fromEntries(Object.entries(receipt).filter(([key])=>
+        key!=='receipt_sha256'))));
+    fs.writeFileSync(path.join(receipts,'SLICE-001.json'),journal.canonicalJson({
+      ...receipt,status:'invalidated'}));
+    const projection=receiptProjection(work,{slices:[{id:'SLICE-001',
+      slice_kind:'release-verification',checked:false}]},false,stateCapability,
+      {verification_plan_sha256:'2'.repeat(64)});
+    assert.deepEqual(projection.rows,[{slice_id:'SLICE-001',
+      slice_kind:'release-verification',status:'invalidated',
+      receipt_sha256:receipt.receipt_sha256}]);
+    assert.equal(projection.status,'incomplete');
+  });
 
 test('no-plan projection has exact defaults and only compatibility plus gate blockers',()=>{
   const built=buildProgressProjectionV1({...empty,plan_identity:{status:'missing',

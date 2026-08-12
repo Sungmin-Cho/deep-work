@@ -5,7 +5,8 @@ const assert=require('node:assert/strict');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateRefactorEvidenceV1,semanticDigest,
   buildFunctionalReceiptTargetLocks,reconstructInvalidatedFunctionalReceipt,
-  validateFunctionalCompletionLedger}=require('./functional-receipt-runtime.js');
+  validateFunctionalCompletionLedger,assertFunctionalRecoveryState}=
+  require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
 const ref=(char)=>({operation_id:op(char),
@@ -135,4 +136,17 @@ test('completion-ledger adoption returns the flat public result contract',()=>{
   assert.deepEqual(validateFunctionalCompletionLedger(completed,{
     sessionId:'s-aaaaaaaa',sliceId:'SLICE-001',
     receiptRelative:result.receipt_path,receipt:current}),result);
+});
+test('invalidated functional replacement requires a reset plan and fresh TDD cycle',()=>{
+  assert.throws(()=>assertFunctionalRecoveryState({
+    target:{id:'SLICE-001',checked:true},
+    fields:{active_slice:null,tdd_state:'PENDING'}}),
+  /functional-recovery-plan-not-reset/);
+  assert.throws(()=>assertFunctionalRecoveryState({
+    target:{id:'SLICE-001',checked:false},
+    fields:{active_slice:'SLICE-001',tdd_state:'GREEN'}}),
+  /functional-recovery-plan-not-reset/);
+  assert.equal(assertFunctionalRecoveryState({
+    target:{id:'SLICE-001',checked:false},
+    fields:{active_slice:'SLICE-001',tdd_state:'SENSOR_CLEAN'}}),true);
 });

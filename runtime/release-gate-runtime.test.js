@@ -169,6 +169,8 @@ test('invalidated release receipts require authenticated native or legacy v1 ide
     worktree_branch:''};
   assert.equal(gate.isInvalidatedReleaseReceipt(legacy),true);
   assert.deepEqual(gate.reconstructInvalidatedReleaseReceipt(legacy),native);
+  const migrated={...legacy};delete migrated.status;
+  assert.deepEqual(gate.normalizeReleaseVerificationReceipt(migrated),native);
   assert.equal(gate.isInvalidatedReleaseReceipt({...invalidated,
     receipt_sha256:'0'.repeat(64)}),false);
   assert.equal(gate.isInvalidatedReleaseReceipt({schema_version:2,

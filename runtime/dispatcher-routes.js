@@ -100,15 +100,12 @@ function safeRemoveTree(root,target){const resolved=path.resolve(target);if(!pla
 function hash(value){return crypto.createHash('sha256').update(Buffer.isBuffer(value)?value:journal.canonicalJson(value)).digest('hex');}
 // Slice completion persists `slices[*].checked` as progress. It is not part
 // of the immutable projection identity compiled before implementation starts.
-// Accept both the marker-free identity and the pre-existing `checked:false`
-// identity so sessions approved by either writer remain readable.
+// Recompute the one producer-backed identity with every progress marker reset.
 function planProjectionHashCandidates(value){
-  const markerFree=structuredClone(value),legacyFalse=structuredClone(value);
-  for(const sliceRow of markerFree?.slices||[])
-    if(sliceRow&&typeof sliceRow==='object')delete sliceRow.checked;
+  const legacyFalse=structuredClone(value);
   for(const sliceRow of legacyFalse?.slices||[])
     if(sliceRow&&typeof sliceRow==='object')sliceRow.checked=false;
-  return new Set([hash(markerFree),hash(legacyFalse)]);
+  return new Set([hash(legacyFalse)]);
 }
 function planProjectionMatches(expected,value){return planProjectionHashCandidates(value).has(String(expected));}
 function storedObject(fields,key){const value=fields[key];if(value&&typeof value==='object'&&!Array.isArray(value))return structuredClone(value);
