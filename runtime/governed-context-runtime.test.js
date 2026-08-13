@@ -8,6 +8,7 @@ const path=require('node:path');
 const platform=require('./platform.js');
 const frontmatter=require('./frontmatter.js');
 const journal=require('./operation-journal.js');
+const transaction=require('./transaction-runtime.js');
 const {compileImmutablePlanAuthorityV2}=require('./plan-runtime.js');
 const {compileVerificationPlan}=require('./verification-policy-runtime.js');
 const {semanticDigest}=require('./release-gate-runtime.js');
@@ -16,6 +17,7 @@ const {buildProgressProjectionV1,selectGovernedAdmission,loadGovernedContext,
   require('./governed-context-runtime.js');
 const reportRuntime=require('./report-runtime.js');
 const releaseRuntime=require('./release-gate-runtime.js');
+const functionalRuntime=require('./functional-receipt-runtime.js');
 
 const empty={evidence:{status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
   invalidated_ids:[]},residual_risk:{status:'unknown',class:null,accepted:null,
@@ -74,6 +76,86 @@ test('receipt projection classifies authenticated release invalidation as incomp
       receipt_sha256:receipt.receipt_sha256}]);
     assert.equal(projection.status,'incomplete');
   });
+
+test('release projection rejects a stale embedded functional receipt',async(t)=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-governed-functional-dependency-')));t.after(()=>fs.rmSync(root,
+    {recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa',work=path.join(root,'.deep-work',sessionId),
+    receipts=path.join(work,'receipts');fs.mkdirSync(receipts,{recursive:true});
+  const statePath=path.join(root,'.claude',`deep-work.${sessionId}.md`);
+  const stateFields={session_id:sessionId,work_dir:`.deep-work/${sessionId}`,
+    current_phase:'test',verification_plan_sha256:'9'.repeat(64)};
+  fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',stateFields));
+  const stateCapability=platform.issueProjectStateCapability(root,statePath,
+    {role:'session-state'});fs.writeFileSync(statePath,
+    frontmatter.updateFrontmatterText('',stateFields));
+  const op=(char)=>`op-${char.repeat(64)}`;
+  const verificationRef=(char)=>({operation_id:op(char),result_path:
+    `.claude/deep-work.${sessionId}.verification.${op(char)}.json`,
+    result_sha256:char.repeat(64),ledger_result_sha256:
+      ((Number.parseInt(char,16)+1)%16).toString(16).repeat(64)});
+  const refactor={kind:'no-refactor',decision_operation_id:op('1'),
+    reason_code:'no-duplication',post_decision_green:verificationRef('2'),
+    sensor_results:[{kind:'lint',operation_id:op('3'),result_path:
+      `.claude/deep-work.${sessionId}.sensor.${op('3')}.json`,
+      result_sha256:'4'.repeat(64),ledger_result_sha256:'5'.repeat(64)}],
+    decision_sha256:null};
+  refactor.decision_sha256=functionalRuntime.semanticDigest(
+    'refactor-evidence-v1',refactor,'decision_sha256');
+  const functional=functionalRuntime.buildFunctionalSliceReceiptV2({
+    session_id:sessionId,slice_id:'SLICE-001',plan_authority_sha256:'8'.repeat(64),
+    verification_plan_sha256:'9'.repeat(64),red_proof_ref:
+      `.deep-work/${sessionId}/red-proofs/${'a'.repeat(64)}.json`,
+    red_proof_sha256:'a'.repeat(64),red_proof_operation_id:op('6'),
+    green_verification:verificationRef('7'),refactor_evidence:refactor});
+  const gateRef={gate_id:'GATE-full-relevant-suite',operation_id:op('b'),
+    result_path:`.deep-work/${sessionId}/gate-results/${op('b')}.json`,
+    result_sha256:'c'.repeat(64),ledger_result_sha256:'d'.repeat(64),
+    checker_id:'command-v1',argv_sha256:'e'.repeat(64)};
+  const release={schema_version:1,slice_id:'SLICE-002',
+    plan_authority_sha256:'8'.repeat(64),verification_plan_sha256:'9'.repeat(64),
+    gate_results:[gateRef],functional_receipts:[{slice_id:'SLICE-001',
+      receipt_sha256:functional.receipt_sha256,
+      completion_operation_id:functional.completion_operation_id}],
+    completion_operation_id:op('f'),receipt_sha256:null};
+  release.receipt_sha256=journal.sha256(journal.canonicalJson(
+    Object.fromEntries(Object.entries(release).filter(([key])=>
+      key!=='receipt_sha256'))));
+  stateFields.release_verification_operation_id=release.completion_operation_id;
+  stateFields.release_verification_receipt_sha256=release.receipt_sha256;
+  fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',stateFields));
+  const plan={schema_version:2,plan_authority_sha256:'8'.repeat(64),slices:[
+    {id:'SLICE-001',slice_kind:'functional',checked:true},
+    {id:'SLICE-002',slice_kind:'release-verification',checked:true}]};
+  fs.writeFileSync(path.join(work,'plan.json'),journal.canonicalJson(plan));
+  fs.writeFileSync(path.join(receipts,'SLICE-001.json'),
+    journal.canonicalJson(functional));
+  fs.writeFileSync(path.join(receipts,'SLICE-002.json'),
+    journal.canonicalJson(release));
+  const project=transaction.projectCapabilityFor(stateCapability);
+  const functionalOperation=await journal.beginOperation({projectCapability:project,
+    sessionId,kind:'functional-slice-complete-v2',operationId:
+      functional.completion_operation_id,slice:'SLICE-001'});
+  await journal.completeOperation(functionalOperation,{session_id:sessionId,
+    slice_id:'SLICE-001',receipt_path:`.deep-work/${sessionId}/receipts/SLICE-001.json`,
+    receipt_sha256:functional.receipt_sha256,post_state_sha256:'1'.repeat(64)});
+  const releaseOperation=await journal.beginOperation({projectCapability:project,
+    sessionId,kind:'release-verification-complete',operationId:release.completion_operation_id});
+  await journal.completeOperation(releaseOperation,{slice_id:'SLICE-002',
+    receipt_path:`.deep-work/${sessionId}/receipts/SLICE-002.json`,
+    receipt_sha256:release.receipt_sha256,post_state_sha256:'2'.repeat(64)});
+  let projection=receiptProjection(work,plan,false,stateCapability,stateFields);
+  assert.equal(projection.rows.find((row)=>row.slice_id==='SLICE-002').status,'complete',
+    JSON.stringify(projection));
+  fs.writeFileSync(path.join(receipts,'SLICE-001.json'),journal.canonicalJson({
+    ...functional,status:'invalidated'}));
+  projection=receiptProjection(work,plan,false,stateCapability,stateFields);
+  assert.equal(projection.rows.find((row)=>row.slice_id==='SLICE-001').status,'invalidated');
+  assert.equal(projection.rows.find((row)=>row.slice_id==='SLICE-002').status,'unknown');
+  assert.equal(projection.status,'unknown');
+});
 
 test('no-plan projection has exact defaults and only compatibility plus gate blockers',()=>{
   const built=buildProgressProjectionV1({...empty,plan_identity:{status:'missing',

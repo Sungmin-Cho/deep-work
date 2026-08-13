@@ -3,7 +3,8 @@
 const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
-const {canonicalJson}=require('./operation-journal.js');
+const journal=require('./operation-journal.js');
+const {canonicalJson}=journal;
 
 const DIGEST=/^[0-9a-f]{64}$/;
 const POINTS=['finish-finalize','finish-pre-action','test'];
@@ -242,6 +243,40 @@ function readBoundedJson(file,code,max=4_194_304){
   if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)fail(code);
   return value;
 }
+function authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
+  project,sessionId,fields}={}){
+  const expected=(plan.slices||[]).filter((row)=>row.slice_kind==='functional')
+    .map((row)=>row.id).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const refs=checked?.functional_receipts;
+  if(!Array.isArray(refs)||canonicalJson(refs.map((row)=>row?.slice_id))!==
+      canonicalJson(expected))fail('governed-release-functional');
+  const runtime=require('./functional-receipt-runtime.js');
+  for(const ref of refs){
+    const slice=plan.slices.find((row)=>row.id===ref.slice_id);
+    const relative=`.deep-work/${sessionId}/receipts/${ref.slice_id}.json`;
+    const file=path.join(workDir,'receipts',`${ref.slice_id}.json`);
+    const receipt=runtime.validateFunctionalSliceReceiptV2(
+      readBoundedCanonical(file,'governed-release-functional',1_048_576));
+    const producer=journal.lookupCompletedOperation({projectCapability:project,
+      operationId:ref.completion_operation_id,sessionId,
+      kind:'functional-slice-complete-v2'});
+    const result=producer?.result;
+    if(slice?.checked!==true||receipt.slice_id!==ref.slice_id||
+        receipt.receipt_sha256!==ref.receipt_sha256||
+        receipt.completion_operation_id!==ref.completion_operation_id||
+        receipt.plan_authority_sha256!==plan.plan_authority_sha256||
+        receipt.verification_plan_sha256!==fields.verification_plan_sha256||
+        producer?.stage!=='completed-ledger'||!exactKeys(result,
+          ['session_id','slice_id','receipt_path','receipt_sha256',
+            'post_state_sha256'])||result.session_id!==sessionId||
+        result.slice_id!==ref.slice_id||result.receipt_path!==relative||
+        result.receipt_sha256!==ref.receipt_sha256||
+        !DIGEST.test(result.post_state_sha256||'')||
+        producer.resultSha256!==journal.sha256(canonicalJson(result)))
+      fail('governed-release-functional');
+  }
+  return true;
+}
 function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
   const rows=[];let unknown=false,incomplete=false;
   const transaction=require('./transaction-runtime.js');
@@ -305,6 +340,8 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
               status,receipt_sha256:receiptSha256});continue;
           }
           const checked=releaseRuntime.normalizeReleaseVerificationReceipt(value);
+          authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
+            project,sessionId,fields});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({

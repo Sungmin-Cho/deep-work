@@ -23,22 +23,73 @@ test('incomplete evidence cannot set test_passed for a compiled plan',()=>{
     verificationPlan,evidencePackage:null,evidenceSummary:{complete:false},at:'2026-07-13T00:00:00Z'}),/evidence|gate-results/);
 });
 
-test('retry invalidates only failed slices and mutation round is separate', () => {
-  const plan = {slices:[{id:'SLICE-001',checked:true},{id:'SLICE-002',checked:true}]};
-  const receipts = {'SLICE-001':{status:'complete'}, 'SLICE-002':{status:'complete'}};
+test('retry invalidates failed functional slices and dependent release progress', () => {
+  const plan = {slices:[{id:'SLICE-001',slice_kind:'functional',checked:true},
+    {id:'SLICE-002',slice_kind:'functional',checked:true},
+    {id:'SLICE-003',slice_kind:'release-verification',checked:true}]};
+  const receipts = {'SLICE-001':{status:'complete'}, 'SLICE-002':{status:'complete'},
+    'SLICE-003':{status:'complete'}};
   const result = recordTestRetry({state:{current_phase:'test',test_retry_count:0,max_test_retries:2},
     plan, receipts, failedSlices:['SLICE-002']});
   assert.equal(result.plan.slices[0].checked, true);
   assert.equal(result.plan.slices[1].checked, false);
+  assert.equal(result.plan.slices[2].checked, false);
   assert.equal(result.receipts['SLICE-002'].status, 'invalidated');
+  assert.equal(result.receipts['SLICE-003'].status, 'invalidated');
   assert.equal(result.state.receipt_recovery_generation,1);
   const exhausted=recordTestExhaustion({state:{current_phase:'test',test_retry_count:2,
     max_test_retries:2},plan,receipts,failedSlices:['SLICE-001']});
-  assert.equal(exhausted.state.receipt_recovery_generation,1);
+  assert.equal(exhausted.state.receipt_recovery_generation,3);
   assert.equal(beginMutationRound({state:{current_phase:'test'}, round:1,
     survived:{mutants:[1]}}).current_phase, 'implement');
   assert.equal(recordMutationResult({state:{}, result:{status:'not-applicable'}})
     .mutation_testing.status, 'not-applicable');
+});
+
+test('functional retry invalidates the dependent release receipt and progress',()=>{
+  const plan={slices:[{id:'SLICE-001',slice_kind:'functional',checked:true},
+    {id:'SLICE-002',slice_kind:'release-verification',checked:true}]};
+  const receipts={'SLICE-001':{status:'complete'},'SLICE-002':{status:'complete'}};
+  const result=recordTestRetry({state:{current_phase:'test',test_retry_count:1,
+    receipt_recovery_generation:1,max_test_retries:3},plan,receipts,
+    failedSlices:['SLICE-001']});
+  assert.deepEqual(result.invalidatedSlices,['SLICE-001','SLICE-002']);
+  assert.deepEqual(result.plan.slices.map((slice)=>slice.checked),[false,false]);
+  assert.deepEqual(Object.values(result.receipts).map((receipt)=>receipt.status),
+    ['invalidated','invalidated']);
+  assert.equal(result.state.receipt_recovery_generation,2);
+});
+
+test('journaled functional retry invalidates dependent release stores',async()=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-test-dependent-release-')));fs.mkdirSync(path.join(root,'.git'));
+  fs.mkdirSync(path.join(root,'.claude'));const sessionId='s-aaaaaaaa';
+  const work=path.join(root,'.deep-work',sessionId),receipts=path.join(work,'receipts');
+  fs.mkdirSync(receipts,{recursive:true});const statePath=path.join(root,'.claude',
+    `deep-work.${sessionId}.md`);fs.writeFileSync(statePath,
+    '---\nsession_id: s-aaaaaaaa\nwork_dir: .deep-work/s-aaaaaaaa\n'+
+    'current_phase: test\ntest_retry_count: 1\nreceipt_recovery_generation: 1\n'+
+    'max_test_retries: 3\n---\n');
+  const plan={slices:[{id:'SLICE-001',slice_kind:'functional',checked:true},
+    {id:'SLICE-002',slice_kind:'release-verification',checked:true}]};
+  fs.writeFileSync(path.join(work,'plan.json'),JSON.stringify(plan));
+  for(const id of ['SLICE-001','SLICE-002'])fs.writeFileSync(
+    path.join(receipts,`${id}.json`),JSON.stringify({slice_id:id,status:'complete'}));
+  const stateCapability=platform.issueProjectStateCapability(root,statePath,
+    {role:'session-state'});const sessionCapability=platform.issueProjectStateCapability(
+      root,work,{role:'session-work-dir',sessionStateCapability:stateCapability});
+  const planCapability=transaction.issueSessionFileCapability({sessionCapability,
+    candidate:path.join(work,'plan.json'),allowedBasenames:['plan.json'],role:'locked-plan'});
+  const result=await recordTestRetry({stateCapability,planCapability,plan,
+    receiptsDirCapability:Object.freeze({kind:'receipts-directory',role:'receipts-directory',
+      path:receipts,sessionCapability,projectRoot:root}),failedSlices:['SLICE-001'],
+    at:'2026-07-13T00:00:00Z'});
+  assert.deepEqual(result.operationReceipt.result.invalidatedSlices,
+    ['SLICE-001','SLICE-002']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(work,'plan.json'))).slices
+    .map((slice)=>slice.checked),[false,false]);
+  assert.deepEqual(['SLICE-001','SLICE-002'].map((id)=>JSON.parse(fs.readFileSync(
+    path.join(receipts,`${id}.json`))).status),['invalidated','invalidated']);
 });
 
 test('test retry adopts every partial plan receipt and state write',async()=>{
