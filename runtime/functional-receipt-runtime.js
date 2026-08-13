@@ -18,6 +18,81 @@ function semanticDigest(domain,value,omitted){
   return crypto.createHash('sha256').update(Buffer.concat([
     Buffer.from(`${domain}\0`),Buffer.from(canonicalJson(copy))])).digest('hex');
 }
+function recoveryGenerationFromFields(fields={}){
+  const retry=fields.test_retry_count===undefined?0:fields.test_retry_count;
+  const persisted=fields.receipt_recovery_generation===undefined?
+    retry:fields.receipt_recovery_generation;
+  if(!Number.isSafeInteger(retry)||retry<0||!Number.isSafeInteger(persisted)||
+      persisted<0)fail('functional-recovery-generation');
+  return Math.max(retry,persisted);
+}
+function requiresFunctionalReceiptBinding(fields={}){
+  return recoveryGenerationFromFields(fields)>0||
+    Object.hasOwn(fields,'functional_receipt_bindings_json');
+}
+function parseFunctionalReceiptBindings(value){
+  if(value===undefined||value===null||value==='')return{};
+  let parsed=value;
+  if(typeof value==='string')try{parsed=JSON.parse(value);}catch{
+    fail('functional-receipt-bindings');}
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+    fail('functional-receipt-bindings');
+  const result={};
+  for(const [sliceId,binding] of Object.entries(parsed)){
+    if(!SLICE.test(sliceId)||!exactKeys(binding,['recovery_generation',
+        'receipt_sha256','completion_operation_id'])||
+        !Number.isSafeInteger(binding.recovery_generation)||
+        binding.recovery_generation<0||
+        !(binding.receipt_sha256===null||DIGEST.test(binding.receipt_sha256||''))||
+        !(binding.completion_operation_id===null||
+          OPERATION.test(binding.completion_operation_id||''))||
+        (binding.receipt_sha256===null)!==(binding.completion_operation_id===null))
+      fail('functional-receipt-bindings');
+    result[sliceId]=structuredClone(binding);
+  }
+  return result;
+}
+function serializeFunctionalReceiptBindings(value){
+  return canonicalJson(parseFunctionalReceiptBindings(value));
+}
+function setFunctionalReceiptBinding(value,sliceId,binding){
+  if(!SLICE.test(sliceId||''))fail('functional-receipt-bindings');
+  const result=parseFunctionalReceiptBindings(value);
+  const checked=parseFunctionalReceiptBindings({[sliceId]:binding})[sliceId];
+  result[sliceId]=checked;
+  return result;
+}
+function invalidateFunctionalReceiptBinding(value,sliceId,recoveryGeneration){
+  if(!Number.isSafeInteger(recoveryGeneration)||recoveryGeneration<0)
+    fail('functional-recovery-generation');
+  return setFunctionalReceiptBinding(value,sliceId,{recovery_generation:
+    recoveryGeneration,receipt_sha256:null,completion_operation_id:null});
+}
+function authenticateFunctionalReceiptBinding({fields,sliceId,receipt,
+  requireBinding=false,invalidated=false}={}){
+  const binding=parseFunctionalReceiptBindings(fields?.functional_receipt_bindings_json)[sliceId];
+  if(!binding){if(requireBinding)fail('functional-receipt-binding');return true;}
+  const generation=recoveryGenerationFromFields(fields);
+  if(binding.recovery_generation>generation)
+    fail('functional-receipt-binding');
+  if(invalidated){
+    if(binding.recovery_generation!==generation||
+        binding.receipt_sha256!==null||binding.completion_operation_id!==null)
+      fail('functional-receipt-binding');
+  }else if(binding.receipt_sha256!==receipt?.receipt_sha256||
+      binding.completion_operation_id!==receipt?.completion_operation_id)
+    fail('functional-receipt-binding');
+  return true;
+}
+function receiptBindingFromReceipt(receipt,recoveryGeneration){
+  if(!Number.isSafeInteger(recoveryGeneration)||recoveryGeneration<0)
+    fail('functional-recovery-generation');
+  if(!DIGEST.test(receipt?.receipt_sha256||'')||
+      !OPERATION.test(receipt?.completion_operation_id||''))return null;
+  return{recovery_generation:recoveryGeneration,
+    receipt_sha256:receipt.receipt_sha256,
+    completion_operation_id:receipt.completion_operation_id};
+}
 function validateVerificationResultRefV1(value){
   if(!exactKeys(value,['operation_id','result_path','result_sha256',
     'ledger_result_sha256'])||!OPERATION.test(value.operation_id||'')||
@@ -352,6 +427,9 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   if(!target||target.slice_kind!=='functional')fail('functional-completion-slice');
   const stateText=fs.readFileSync(stateCapability.path,'utf8');
   const fields=frontmatter.parseFrontmatter(stateText).fields;
+  const recoveryGeneration=recoveryGenerationFromFields(fields);
+  const binding=fields.functional_receipt_bindings_json===undefined?
+    {}:parseFunctionalReceiptBindings(fields.functional_receipt_bindings_json);
   if(fields.current_phase!=='implement'||
       !(fields.active_slice===sliceId||target.checked&&fields.active_slice===null)||
       !DIGEST.test(fields.verification_plan_sha256||''))
@@ -407,6 +485,8 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     if(storedRaw.status==='invalidated')
       fail('functional-recovery-fresh-evidence');
     const stored=validateFunctionalSliceReceiptV2(storedRaw);
+    authenticateFunctionalReceiptBinding({fields,sliceId,receipt:stored,
+      requireBinding:requiresFunctionalReceiptBinding(fields)});
     if(canonicalJson(stored)!==canonicalJson(receipt))
       fail('functional-completion-ledger');
     const result=validateFunctionalCompletionLedger(completed,{sessionId:sid,
@@ -472,15 +552,14 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   }
   const currentState=fs.readFileSync(stateCapability.path,'utf8');
   const currentFields=frontmatter.parseFrontmatter(currentState).fields;
-  const implementSlices=nextPlan.slices.filter((row)=>
-    row.slice_kind!=='release-verification');
   const afterState=frontmatter.updateFrontmatterText(currentState,{
     active_slice:null,tdd_state:'PENDING',accepted_write_operation_id:null,
     accepted_write_receipt_sha256:null,accepted_write_class:null,
     functional_receipt_sha256:receipt.receipt_sha256,
     functional_completion_operation_id:operationId,
-    implement_completed_at:implementSlices.length>0&&
-      implementSlices.every((row)=>row.checked===true)?
+    functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+      ...binding,[sliceId]:receiptBindingFromReceipt(receipt,recoveryGeneration)}),
+    implement_completed_at:planRuntime.implementProgressComplete(nextPlan)?
       currentFields.implement_completed_at||new Date().toISOString():undefined});
   if(afterState!==currentState){
     seam?.('before-state-write',{operationId});
@@ -506,4 +585,8 @@ module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   assertFunctionalRecoveryState,
   authenticateVerificationResultRefV1,authenticateSensorResultRefV1,
   authenticateRedProof,buildFunctionalReceiptTargetLocks,
-  publishFunctionalSliceReceiptV2,semanticDigest};
+  publishFunctionalSliceReceiptV2,semanticDigest,recoveryGenerationFromFields,
+  requiresFunctionalReceiptBinding,
+  parseFunctionalReceiptBindings,serializeFunctionalReceiptBindings,
+  setFunctionalReceiptBinding,invalidateFunctionalReceiptBinding,
+  authenticateFunctionalReceiptBinding,receiptBindingFromReceipt};

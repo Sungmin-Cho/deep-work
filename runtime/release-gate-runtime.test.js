@@ -242,8 +242,12 @@ test('release completion identity advances after an authenticated test retry',()
   const first=gate.buildReleaseVerificationCompletionPreconditions(common);
   const retried=gate.buildReleaseVerificationCompletionPreconditions({
     ...common,fields:{...common.fields,test_retry_count:1}});
+  const floor=gate.buildReleaseVerificationCompletionPreconditions({
+    ...common,fields:{...common.fields,test_retry_count:3,
+      receipt_recovery_generation:1}});
   assert.equal(Object.hasOwn(first,'retry_generation'),false);
   assert.equal(retried.retry_generation,1);
+  assert.equal(floor.retry_generation,3);
   assert.notEqual(gate.semanticDigest('release-verification-complete-v1',first),
     gate.semanticDigest('release-verification-complete-v1',retried));
   assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({

@@ -5,7 +5,9 @@ const assert=require('node:assert/strict');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateRefactorEvidenceV1,semanticDigest,
   buildFunctionalReceiptTargetLocks,reconstructInvalidatedFunctionalReceipt,
-  validateFunctionalCompletionLedger,assertFunctionalRecoveryState}=
+  validateFunctionalCompletionLedger,assertFunctionalRecoveryState,
+  serializeFunctionalReceiptBindings,authenticateFunctionalReceiptBinding,
+  requiresFunctionalReceiptBinding}=
   require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
@@ -153,4 +155,34 @@ test('invalidated functional replacement requires a reset plan and fresh TDD cyc
   assert.equal(assertFunctionalRecoveryState({
     target:{id:'SLICE-001',checked:false},
     fields:{active_slice:'SLICE-001',tdd_state:'SENSOR_CLEAN'}}),true);
+});
+
+test('functional receipt binding rejects restored evidence after retry invalidation',()=>{
+  const current=receipt();
+  const invalidatedFields={test_retry_count:1,receipt_recovery_generation:1,
+    functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+      'SLICE-001':{recovery_generation:1,receipt_sha256:null,
+        completion_operation_id:null}})};
+  assert.equal(requiresFunctionalReceiptBinding(invalidatedFields),true);
+  assert.doesNotThrow(()=>authenticateFunctionalReceiptBinding({
+    fields:invalidatedFields,sliceId:'SLICE-001',invalidated:true,
+    requireBinding:true}));
+  assert.throws(()=>authenticateFunctionalReceiptBinding({
+    fields:invalidatedFields,sliceId:'SLICE-001',receipt:current,
+    requireBinding:true}),/functional-receipt-binding/);
+  const currentFields={test_retry_count:1,receipt_recovery_generation:1,
+    functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+      'SLICE-001':{recovery_generation:1,
+        receipt_sha256:current.receipt_sha256,
+        completion_operation_id:current.completion_operation_id}})};
+  assert.doesNotThrow(()=>authenticateFunctionalReceiptBinding({
+    fields:currentFields,sliceId:'SLICE-001',receipt:current,
+    requireBinding:true}));
+  assert.throws(()=>authenticateFunctionalReceiptBinding({
+    fields:{...currentFields,functional_receipt_bindings_json:
+      serializeFunctionalReceiptBindings({'SLICE-001':{
+        recovery_generation:1,receipt_sha256:'0'.repeat(64),
+        completion_operation_id:'op-'+'0'.repeat(64)}})},
+    sliceId:'SLICE-001',receipt:current,requireBinding:true}),
+  /functional-receipt-binding/);
 });

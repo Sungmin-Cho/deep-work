@@ -7,6 +7,7 @@ const { recordTestPass, recordTestRetry, recordTestExhaustion, beginMutationRoun
   require('./test-runtime.js');
 const platform=require('./platform.js');const transaction=require('./transaction-runtime.js');
 const {parseFrontmatter}=require('./frontmatter.js');
+const functionalReceipt=require('./functional-receipt-runtime.js');
 
 test('test pass consumes bounded complete gate evidence', () => {
   const state = {current_phase:'test', test_retry_count:0};
@@ -37,6 +38,7 @@ test('retry invalidates failed functional slices and dependent release progress'
   assert.equal(result.receipts['SLICE-002'].status, 'invalidated');
   assert.equal(result.receipts['SLICE-003'].status, 'invalidated');
   assert.equal(result.state.receipt_recovery_generation,1);
+  assert.equal(result.state.test_passed,false);
   const exhausted=recordTestExhaustion({state:{current_phase:'test',test_retry_count:2,
     max_test_retries:2},plan,receipts,failedSlices:['SLICE-001']});
   assert.equal(exhausted.state.receipt_recovery_generation,3);
@@ -51,13 +53,29 @@ test('functional retry invalidates the dependent release receipt and progress',(
     {id:'SLICE-002',slice_kind:'release-verification',checked:true}]};
   const receipts={'SLICE-001':{status:'complete'},'SLICE-002':{status:'complete'}};
   const result=recordTestRetry({state:{current_phase:'test',test_retry_count:1,
-    receipt_recovery_generation:1,max_test_retries:3},plan,receipts,
+    receipt_recovery_generation:1,max_test_retries:3,test_passed:true,
+    functional_receipt_sha256:'a'.repeat(64),
+    functional_completion_operation_id:'op-'+'b'.repeat(64),
+    release_verification_receipt_sha256:'c'.repeat(64),
+    release_verification_operation_id:'op-'+'d'.repeat(64),
+    functional_receipt_bindings_json:functionalReceipt.serializeFunctionalReceiptBindings({
+      'SLICE-001':{recovery_generation:1,receipt_sha256:'a'.repeat(64),
+        completion_operation_id:'op-'+'b'.repeat(64)}})},plan,receipts,
     failedSlices:['SLICE-001']});
   assert.deepEqual(result.invalidatedSlices,['SLICE-001','SLICE-002']);
   assert.deepEqual(result.plan.slices.map((slice)=>slice.checked),[false,false]);
   assert.deepEqual(Object.values(result.receipts).map((receipt)=>receipt.status),
     ['invalidated','invalidated']);
   assert.equal(result.state.receipt_recovery_generation,2);
+  assert.equal(result.state.test_passed,false);
+  assert.equal(result.state.functional_receipt_sha256,null);
+  assert.equal(result.state.functional_completion_operation_id,null);
+  assert.equal(result.state.release_verification_receipt_sha256,null);
+  assert.equal(result.state.release_verification_operation_id,null);
+  assert.deepEqual(functionalReceipt.parseFunctionalReceiptBindings(
+    result.state.functional_receipt_bindings_json),{
+      'SLICE-001':{recovery_generation:2,receipt_sha256:null,
+        completion_operation_id:null}});
 });
 
 test('journaled functional retry invalidates dependent release stores',async()=>{
@@ -113,6 +131,10 @@ test('test retry adopts every partial plan receipt and state write',async()=>{
   assert.equal(JSON.parse(fs.readFileSync(path.join(receipts,'SLICE-002.json'),'utf8')).status,'invalidated');
   const fields=parseFrontmatter(fs.readFileSync(statePath,'utf8')).fields;assert.equal(fields.current_phase,'implement');
   assert.equal(fields.test_retry_count,1);assert.equal(fields.receipt_recovery_generation,1);
+  assert.equal(fields.test_passed,false);
+  assert.equal(Object.hasOwn(fields,'release_verification_receipt_sha256'),false);
+  assert.equal(Object.hasOwn(fields,'release_verification_operation_id'),false);
+  assert.equal(Object.hasOwn(fields,'functional_receipt_bindings_json'),false);
 });
 
 test('test retry uses bounded lock basenames for deep session work paths',async()=>{

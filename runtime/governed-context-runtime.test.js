@@ -157,6 +157,89 @@ test('release projection rejects a stale embedded functional receipt',async(t)=>
   assert.equal(projection.status,'unknown');
 });
 
+test('critical governed finish requires the final point human ack', (t) => {
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-governed-final-ack-')));t.after(()=>fs.rmSync(root,
+    {recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa',work=path.join(root,'.deep-work',sessionId);
+  fs.mkdirSync(work,{recursive:true});
+  const specContract={schema_version:1,spec_id:'SPEC-FINAL-ACK',
+    title:'Final ack',requirements:[{id:'REQ-001',statement:'Preserve state',
+      evidence_gate_ids:['GATE-backward-compat','GATE-migration-dry-run'],
+      acceptance_criteria:['state is preserved']}],
+    failure_matrix:[],compatibility:{legacy_inputs:'covered',migration:'covered'}};
+  const specText=`# Executable Spec: Final ack
+## Scope
+x
+## Non-goals
+x
+## Contract
+\`\`\`json spec-contract
+${JSON.stringify(specContract)}
+\`\`\`
+## Requirement Notes
+x
+## Failure and Recovery Notes
+x
+## Decisions and Trade-offs
+x
+## Open Questions
+x
+## Spec Gate Result
+x
+`;
+  const riskSha='1'.repeat(64),specSha=require('./contract-runtime.js')
+    .specContractDigest(specContract),approved=journal.sha256(Buffer.from(specText));
+  const facts={schema_version:1,authority:'reviewed-plan',destructive:false,
+    external_action:false,has_backward_compat:true,has_migration:true,
+    host_dependent:false,source_requirement_ids:['REQ-001'],
+    source_slice_ids:['SLICE-001']};
+  facts.facts_sha256=semanticDigest('capability-facts-v1',facts);
+  const plan={schema_version:2,replan_epoch:null,contract_binding:{
+    mode:'strict-spec',created_by_version:'7.0.0',source_plan_sha256:'3'.repeat(64),
+    risk_profile_sha256:riskSha,spec_contract:{schema_version:1,spec_id:'SPEC-FINAL-ACK',
+      spec_sha256:specSha,spec_approved_hash:approved}},capability_facts:facts,
+    slices:[{id:'SLICE-001',slice_kind:'release-verification',checked:false,
+      scope_schema_version:1,files:[],write_scope:{failing_test:[],production:[],refactor:[]},
+      verification_scope:['npm test'],release_gate_ids:['GATE-human-ack'],
+      verification_spec:null,verification_spec_sha256:null}]};
+  plan.plan_authority_sha256=compileImmutablePlanAuthorityV2(plan)
+    .plan_authority_sha256;
+  const verificationPlan=compileVerificationPlan({
+    riskProfile:{class:'critical',score:8,triggers:[]},riskProfileSha256:riskSha,
+    policySnapshot:require('./policy-runtime.js').compileMethodologyAuthority({
+      riskProfile:{class:'critical'},difficulty:'high',mode:'adaptive'}),specContract,
+    specSha256:specSha,specApprovedHash:approved,planProjection:plan,capabilities:{},
+    compatibilityFacts:{created_by_version:'7.0.0',spec_policy_required:true}});
+  fs.writeFileSync(path.join(work,'spec.md'),specText);
+  fs.writeFileSync(path.join(work,'plan.json'),journal.canonicalJson(plan));
+  const statePath=path.join(root,'.claude',`deep-work.${sessionId}.md`);
+  const review={external_change_lock:false,points:{plan:{risk_class:'critical',
+    human_ack:{required:true,at:'2026-07-27T00:00:00.000Z',actor:'human'}}}};
+  fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',{
+    session_id:sessionId,work_dir:`.deep-work/${sessionId}`,current_phase:'test',
+    verification_plan_sha256:verificationPlan.plan_sha256,
+    verification_plan_json:JSON.stringify(verificationPlan),
+    methodology_policy_json:JSON.stringify(require('./policy-runtime.js')
+      .compileMethodologyAuthority({riskProfile:{class:'critical'},difficulty:'high',
+        mode:'adaptive'})),review_execution_json:JSON.stringify(review)}));
+  const stateCapability=platform.issueProjectStateCapability(root,statePath,
+    {role:'session-state'});
+  const evidenceRuntime=require('./evidence-runtime.js');
+  const originalLoad=evidenceRuntime.loadCommittedPackage;
+  const originalEvaluate=evidenceRuntime.evaluateEvidenceCompleteness;
+  evidenceRuntime.loadCommittedPackage=()=>({schema_version:2});
+  evidenceRuntime.evaluateEvidenceCompleteness=()=>({complete:true,
+    redaction:{passed:true},satisfied_gate_ids:verificationPlan.evidence_required_gate_ids,
+    missing_gate_ids:[],unverified_areas:[]});
+  t.after(()=>{evidenceRuntime.loadCommittedPackage=originalLoad;
+    evidenceRuntime.evaluateEvidenceCompleteness=originalEvaluate;});
+  const projection=loadGovernedContext({stateCapability}).projection;
+  const admission=selectGovernedAdmission(projection,'finish-finalize');
+  assert.equal(admission.blocking_codes.includes('human-ack-missing'),true);
+});
+
 test('no-plan projection has exact defaults and only compatibility plus gate blockers',()=>{
   const built=buildProgressProjectionV1({...empty,plan_identity:{status:'missing',
     plan_authority_sha256:null,verification_plan_sha256:null}});

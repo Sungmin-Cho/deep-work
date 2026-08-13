@@ -511,11 +511,13 @@ function buildReleaseVerificationCompletionPreconditions({sessionId,sliceId,curr
     plan_authority_sha256:current.plan_authority_sha256,
     verification_plan_sha256:fields.verification_plan_sha256,
     gate_results:gateResults,functional_receipts:functional};
-  const retryGeneration=fields.receipt_recovery_generation===undefined?
-    (fields.test_retry_count===undefined?0:fields.test_retry_count):
-    fields.receipt_recovery_generation;
-  if(!Number.isSafeInteger(retryGeneration)||retryGeneration<0)
+  const retryCount=fields.test_retry_count===undefined?0:fields.test_retry_count;
+  const persistedGeneration=fields.receipt_recovery_generation===undefined?
+    retryCount:fields.receipt_recovery_generation;
+  if(!Number.isSafeInteger(retryCount)||retryCount<0||
+      !Number.isSafeInteger(persistedGeneration)||persistedGeneration<0)
     fail('release-verification-state');
+  const retryGeneration=Math.max(retryCount,persistedGeneration);
   if(retryGeneration>0)preconditions.retry_generation=retryGeneration;
   return preconditions;
 }
@@ -1128,6 +1130,9 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
   const project=transaction.projectCapabilityFor(stateCapability);
   const sid=transaction.sessionIdFromState(stateCapability),runtime=
     require('./functional-receipt-runtime.js');
+  const fields=frontmatter.parseFrontmatter(
+    fs.readFileSync(stateCapability.path,'utf8')).fields;
+  const requireBinding=runtime.requiresFunctionalReceiptBinding(fields);
   for(const ref of refs){
     const relative=`.deep-work/${sid}/receipts/${ref.slice_id}.json`;
     const raw=readCanonical(path.join(stateCapability.projectRoot,
@@ -1136,12 +1141,20 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
     const producer=await journal.resumeOperation({projectCapability:project,
       operationId:ref.completion_operation_id,sessionId:sid,
       kind:'functional-slice-complete-v2'});
+    runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
+      receipt,requireBinding});
+    const result=producer.result;
     if(receipt.receipt_sha256!==ref.receipt_sha256||
         receipt.completion_operation_id!==ref.completion_operation_id||
         receipt.plan_authority_sha256!==plan.plan_authority_sha256||
         producer.stage!=='completed-ledger'||
-        producer.result?.receipt_path!==relative||
-        producer.result?.receipt_sha256!==ref.receipt_sha256)
+        !exactKeys(result,['session_id','slice_id','receipt_path',
+          'receipt_sha256','post_state_sha256'])||
+        result.session_id!==sid||result.slice_id!==ref.slice_id||
+        result.receipt_path!==relative||
+        result.receipt_sha256!==ref.receipt_sha256||
+        !DIGEST.test(result.post_state_sha256||'')||
+        producer.resultSha256!==journal.sha256(canonical(result)))
       fail('release-verification-functional');
   }
   return structuredClone(refs);

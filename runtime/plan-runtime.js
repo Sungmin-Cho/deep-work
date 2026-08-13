@@ -24,6 +24,12 @@ function byteSort(values) {
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 
+function implementProgressComplete(plan) {
+  const slices=(plan?.slices||[]).filter((row) =>
+    row?.slice_kind !== 'release-verification');
+  return slices.length > 0 && slices.every((row) => row.checked === true);
+}
+
 function isTestPath(file) {
   return /(?:^|\/)(?:tests?|__tests__|fixtures|__mocks__)(?:\/|$)|(?:\.test|\.spec)\.[^/]+$/i.test(file);
 }
@@ -290,6 +296,7 @@ module.exports = {
   validateAssignment,
   publishDelegationScope,
   deriveScopedWriteAuthority,
+  implementProgressComplete,
   compilePlanProjectionV1,
   compileImmutablePlanAuthorityV2,
   publishPlanProjectionV1,

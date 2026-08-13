@@ -8,7 +8,7 @@ const { issueProjectStateCapability, atomicWriteFile,
 const { parseFrontmatter, updateFrontmatterText } = require('./frontmatter.js');
 const {beginOperation,recordOperationStage,completeOperation,resumeOperation,canonicalJson,sha256}=require('./operation-journal.js');
 const {deriveScopedWriteAuthority,publishDelegationScope,canonicalizePlanScopeV1,
-  validateAssignment}=require('./plan-runtime.js');
+  validateAssignment,implementProgressComplete}=require('./plan-runtime.js');
 
 const MODELS = new Set(['haiku','sonnet','opus','main','auto']);
 
@@ -837,7 +837,7 @@ async function completeSlice({stateCapability,planCapability,plan,receiptsDirCap
   if(!adopting){if(seam)seam('before-state-write',{operationId:operation.operationId,sliceId});
     const stateText=fs.readFileSync(stateCapability.path,'utf8');const current=parseFrontmatter(stateText).fields;
     atomicWriteFile(stateCapability,updateFrontmatterText(stateText,{active_slice:null,tdd_state:'PENDING',tdd_override:null,
-      tdd_override_reason_sha256:null,implement_completed_at:plan.slices.every((row)=>row.checked)
+      tdd_override_reason_sha256:null,implement_completed_at:implementProgressComplete(plan)
         ?current.implement_completed_at||new Date().toISOString():undefined}));
     if(seam)seam('after-state-write',{operationId:operation.operationId,sliceId});}
   await recordOperationStage(operation,'state-written',{owned:{sliceId}});

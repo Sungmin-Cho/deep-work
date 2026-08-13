@@ -4,6 +4,7 @@ const fs=require('node:fs');const path=require('node:path');const crypto=require
 const {atomicWriteFile,issueProjectStateCapability}=require('./platform.js');
 const {updateFrontmatterText}=require('./frontmatter.js');
 const transaction=require('./transaction-runtime.js');
+const functionalReceipt=require('./functional-receipt-runtime.js');
 const {beginOperation,recordOperationStage,completeOperation,resumeOperation,canonicalJson,sha256}=require('./operation-journal.js');
 
 function fail(code,message){const error=new Error(`[${code}] ${message||code}`);error.code=code;throw error;}
@@ -84,9 +85,29 @@ function failureTransition({state,plan,receipts,failedSlices,exhausted}){
     for(const slice of slices)
       if(slice.slice_kind==='release-verification')invalidatedIds.add(slice.id);
   const ids=[...invalidatedIds].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const nextGeneration=Math.max(currentGeneration,retryCount)+1;
   const nextState={...clone(state),current_phase:'implement',implement_completed_at:null,
-    receipt_recovery_generation:Math.max(currentGeneration,retryCount)+1};
+    receipt_recovery_generation:nextGeneration,test_passed:false};
   if(!exhausted)nextState.test_retry_count=retryCount+1;
+  const functionalFailedIds=slices.filter((slice)=>
+    failedIds.has(slice.id)&&slice.slice_kind==='functional').map((slice)=>slice.id);
+  const releaseInvalidated=slices.some((slice)=>
+    invalidatedIds.has(slice.id)&&slice.slice_kind==='release-verification');
+  if(functionalFailedIds.length){
+    let bindings=functionalReceipt.parseFunctionalReceiptBindings(
+      state.functional_receipt_bindings_json);
+    for(const id of functionalFailedIds)
+      bindings=functionalReceipt.invalidateFunctionalReceiptBinding(
+        bindings,id,nextGeneration);
+    nextState.functional_receipt_bindings_json=
+      functionalReceipt.serializeFunctionalReceiptBindings(bindings);
+    nextState.functional_receipt_sha256=null;
+    nextState.functional_completion_operation_id=null;
+  }
+  if(releaseInvalidated){
+    nextState.release_verification_receipt_sha256=null;
+    nextState.release_verification_operation_id=null;
+  }
   const nextPlan=clone(plan);const nextReceipts=clone(receipts);
   for(const slice of nextPlan.slices||[])if(invalidatedIds.has(slice.id))slice.checked=false;
   for(const id of ids){
@@ -100,6 +121,18 @@ function failureTransition({state,plan,receipts,failedSlices,exhausted}){
   return {state:nextState,plan:nextPlan,receipts:nextReceipts,
     failedSlices:[...failedIds].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b))),
     invalidatedSlices:ids};
+}
+
+function failureStatePatch(state){
+  const patch={current_phase:'implement',implement_completed_at:null,
+    receipt_recovery_generation:state.receipt_recovery_generation,
+    test_passed:false};
+  for(const key of ['test_retry_count','functional_receipt_bindings_json',
+    'functional_receipt_sha256','functional_completion_operation_id',
+    'release_verification_receipt_sha256',
+    'release_verification_operation_id'])
+    if(Object.hasOwn(state,key))patch[key]=state[key];
+  return patch;
 }
 
 function receiptCapability(directory,id){return transaction.issueSessionFileCapability({sessionCapability:directory.sessionCapability,
@@ -137,9 +170,8 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
       const changed=failureTransition({state:currentState,plan:currentPlan,receipts:currentReceipts,failedSlices:failedIds,exhausted});
       const nextPlanBytes=Buffer.from(canonicalJson(changed.plan));const nextReceiptBytes=Object.fromEntries(ids
         .filter((id)=>changed.receipts[id]!==undefined)
-        .map((id)=>[id,Buffer.from(canonicalJson(changed.receipts[id]))]));const patch={current_phase:'implement',implement_completed_at:null,
-        receipt_recovery_generation:changed.state.receipt_recovery_generation,
-        ...(!exhausted?{test_retry_count:changed.state.test_retry_count}:{})};const nextStateText=updateFrontmatterText(stateText,patch);
+        .map((id)=>[id,Buffer.from(canonicalJson(changed.receipts[id]))]));const statePatch=failureStatePatch(changed.state);
+      const nextStateText=updateFrontmatterText(stateText,statePatch);
       if(canonicalJson(changed.invalidatedSlices)!==canonicalJson(ids))fail('test-store-identity');
       prepared={statePath:stateCapability.path,stateBeforeSha256:sha256(stateText),stateAfterSha256:sha256(nextStateText),
         stateAfterFieldsSha256:sha256(canonicalJson(parseState(nextStateText))),planPath:planCapability.path,
@@ -147,7 +179,8 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
           beforeSha256:receiptBytes[id]===null?null:sha256(receiptBytes[id]),
           afterSha256:nextReceiptBytes[id]===undefined?null:sha256(nextReceiptBytes[id])})),
         nextTestRetryCount:changed.state.test_retry_count??null,
-        nextReceiptRecoveryGeneration:changed.state.receipt_recovery_generation};
+        nextReceiptRecoveryGeneration:changed.state.receipt_recovery_generation,
+        statePatch};
       await recordOperationStage(operation,'stores-prepared',{owned:prepared});}
     if(prepared.statePath!==stateCapability.path||prepared.planPath!==planCapability.path||canonicalJson(prepared.receiptRows.map(
         (row)=>({id:row.id,path:row.path})))!==canonicalJson(ids.map((id)=>({id,path:receiptCaps[id].path}))))fail('test-store-identity');
@@ -170,9 +203,11 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
     const finalPlan=JSON.parse(transaction.readSessionFile(planCapability));const finalReceipts={};
     for(const id of ids)if(fs.existsSync(receiptCaps[id].path))
       finalReceipts[id]=JSON.parse(transaction.readSessionFile(receiptCaps[id]));const receiptSha256=sha256(canonicalJson(finalReceipts));
-    if(stateStore==='before'){const patch={current_phase:'implement',implement_completed_at:null,
+    if(stateStore==='before'){const statePatch=prepared.statePatch||{current_phase:'implement',
+        implement_completed_at:null,
         receipt_recovery_generation:prepared.nextReceiptRecoveryGeneration,
-        ...(!exhausted?{test_retry_count:prepared.nextTestRetryCount}:{})};const next=updateFrontmatterText(stateText,patch);
+        ...(!exhausted?{test_retry_count:prepared.nextTestRetryCount}:{}),
+        test_passed:false};const next=updateFrontmatterText(stateText,statePatch);
       if(sha256(next)!==prepared.stateAfterSha256)fail('test-state-replay');atomicWriteFile(stateCapability,next);
       seam?.('after-state-write-before-stage',{operationId:operation.operationId});}
     await recordOperationStage(operation,'state-written',{owned:{path:stateCapability.path,sha256:prepared.stateAfterSha256}});

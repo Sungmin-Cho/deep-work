@@ -251,12 +251,15 @@ function authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
   if(!Array.isArray(refs)||canonicalJson(refs.map((row)=>row?.slice_id))!==
       canonicalJson(expected))fail('governed-release-functional');
   const runtime=require('./functional-receipt-runtime.js');
+  const requireBinding=runtime.requiresFunctionalReceiptBinding(fields);
   for(const ref of refs){
     const slice=plan.slices.find((row)=>row.id===ref.slice_id);
     const relative=`.deep-work/${sessionId}/receipts/${ref.slice_id}.json`;
     const file=path.join(workDir,'receipts',`${ref.slice_id}.json`);
     const receipt=runtime.validateFunctionalSliceReceiptV2(
       readBoundedCanonical(file,'governed-release-functional',1_048_576));
+    runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
+      receipt,requireBinding});
     const producer=journal.lookupCompletedOperation({projectCapability:project,
       operationId:ref.completion_operation_id,sessionId,
       kind:'functional-slice-complete-v2'});
@@ -293,16 +296,22 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
       const value=raw?.payload||raw;
       if(!value){status='unknown';unknown=true;}
       else if(slice.slice_kind==='functional'&&value.status==='invalidated'){
-        try{require('./functional-receipt-runtime.js')
-          .reconstructInvalidatedFunctionalReceipt({legacy:value,sessionId,
+        try{const runtime=require('./functional-receipt-runtime.js');
+          runtime.reconstructInvalidatedFunctionalReceipt({legacy:value,sessionId,
             sliceId:slice.id,plan,verificationPlanSha256:
               fields.verification_plan_sha256});
+          runtime.authenticateFunctionalReceiptBinding({fields,sliceId:slice.id,
+            invalidated:true,
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields)});
           status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
         }catch{status='unknown';unknown=true;}
       }else if(value.schema_version===2){
         if(!canonicalBytes){status='unknown';unknown=true;}else try{
-          const checked=require('./functional-receipt-runtime.js')
-            .validateFunctionalSliceReceiptV2(value);
+          const runtime=require('./functional-receipt-runtime.js');
+          const checked=runtime.validateFunctionalSliceReceiptV2(value);
+          runtime.authenticateFunctionalReceiptBinding({fields,
+            sliceId:slice.id,receipt:checked,
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields)});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -456,9 +465,18 @@ function loadGovernedContext({stateCapability}={}){
     const copy=structuredClone(row);delete copy.schema_version;return copy;});
   if(activeReplan)warnings.push('invalidation-active');
   const humanAckRequired=verificationPlan?.risk_class==='critical';
-  const hasRequiredHumanAck=Object.values(reviewExecution.points||{}).some((point)=>
-    point?.human_ack?.required===true);
-  const humanAckSatisfied=!humanAckRequired||hasRequiredHumanAck&&
+  const finalPoint=reviewExecution.points?.final;
+  const finalPlan=finalPoint?.review_plan||finalPoint?.plan||finalPoint;
+  const finalAckRequired=finalPoint!==undefined&&(
+    finalPoint?.human_ack?.required===true||
+    finalPoint?.human_ack_required===true||
+    finalPoint?.human_gate?.required===true||
+    finalPlan?.risk_class==='critical'||finalPlan?.profile==='critical');
+  const finalAck=finalPoint?.human_ack;
+  const finalAckSatisfied=finalAckRequired&&finalAck?.required===true&&
+    typeof finalAck.at==='string'&&finalAck.at.length>0&&
+    finalAck.actor==='human';
+  const humanAckSatisfied=!humanAckRequired||finalAckSatisfied&&
     reviewGate.blocking.missing_acks.length===0;
   let evidence={status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
     invalidated_ids:[]},satisfied=[],admissionSatisfied=[],evidenceSummary=null;
