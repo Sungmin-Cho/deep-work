@@ -7,6 +7,13 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [7.1.5] — 2026-08-13 (Strict Recovery Evidence Closure)
+
+### Fixed
+
+- **Strict recovery evidence가 rollback·retry 전환에서 fail-closed로 동작합니다.** Receipt admission, completion evidence, release gate와 test result가 이전 시도의 stale evidence를 받아들이지 않고 현재 recovery generation과 authoritative state에 결속됩니다.
+- **Recovery·receipt 계약이 identity와 ordering 보장을 유지합니다.** Rollback, retry, receipt identity, governed context와 strict completion 경로에 대한 회귀 테스트를 추가했습니다.
+
 ## [7.1.4] — 2026-08-06 (Session-Policy 선행조건 종료)
 
 ### Changed
