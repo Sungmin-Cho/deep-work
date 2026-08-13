@@ -416,6 +416,7 @@ AskUserQuestion:
    - `implement_completed_at: null` 설정
    - 영향 받는 slice의 receipt (`$WORK_DIR/receipts/SLICE-NNN.json`) status를 `"invalidated"`로 기록
    - plan.md의 해당 slice `[x]` → `[ ]`로 해제 (Implement skill Resume Detection이 미완료로 인식하도록)
+   - checklist만 수정하지 말고 공개 journalled retry/replan route로 runtime `plan.json`의 `checked:false`도 확정한다. runtime plan reset 없이 invalidated receipt를 재발행하지 않는다.
    - 그 후 사용자 상세 지시 청취 또는 `Skill("deep-implement", args=ARGS + " --tdd={tdd_mode} --force-rerun")` 재호출. 재구현 완료 시 새 receipt + `implement_completed_at` 기록.
 - option 3 → current_phase는 `implement` 유지. 재개 안내 후 턴 종료.
 

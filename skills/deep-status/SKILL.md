@@ -4,15 +4,6 @@ description: "Current deep-work session status — dashboard, badge, tree, or ro
 user-invocable: true
 ---
 
-## Invocation
-
-이 스킬은 두 가지 경로로 호출됩니다 — 어느 쪽이든 본 SKILL 본문의 절차를 그대로 실행합니다:
-
-1. **Claude Code 슬래시** — 사용자가 `/deep-status [args...]` 입력 (skill 의 `user-invocable: true` 가 슬래시 진입을 허용).
-2. **타 에이전트 / Codex / Copilot CLI / Gemini CLI / SDK** — `Skill({ skill: "deep-work:deep-status", args: "..." })` 형태로 명시 invoke (cross-platform 표준 경로).
-
-두 경로 모두 args 는 동일한 토큰 문자열로 전달되며, 본문 (`$ARGUMENTS` 자리) 의 파서가 동일하게 처리합니다.
-
 ## Inputs (skill args)
 
 | 인자 | 의미 |
@@ -32,11 +23,7 @@ user-invocable: true
 
 ## Prerequisites
 
-이 entry skill 은 `deep-work-orchestrator` (Phase dispatch) 및 `deep-work-workflow` (reference skill — Phase 규약/Exit Gate/M3 envelope) 와 함께 동작합니다. 활성 deep-work 세션이 있을 때는 세션 state file (`.claude/deep-work.<SESSION_ID>.md`) 의 변수 (`work_dir`, `current_phase`, `active_slice` 등) 를 읽어 동작하며, 세션 외부에서도 standalone 실행이 가능한 경우 본문의 분기를 따릅니다.
-
 **Hub-spoke 관계**: 본 skill 은 `deep-receipt` / `deep-history` / `deep-report` / `deep-assumptions` 4 개 sub-skill 의 hub 입니다 — 본문 §6 ~ §9 가 각 sub-skill 의 SKILL.md 를 inline Read 하여 로직을 실행합니다. 4 sub-skill 은 standalone 으로도 호출 가능합니다.
-
-**Cross-platform self-containment**: Claude Code 에서는 sibling skill 이 description 매칭으로 자동 로드됩니다. Codex / Copilot CLI / Gemini CLI / Agent SDK 에서 `Skill()` 로 호출 시 sibling auto-load 보장이 약할 수 있으므로, 본문은 self-contained 으로 보존되어 있습니다 — state file 해석, `$ARGUMENTS` 파싱, AskUserQuestion 분기, 출력 포맷이 인라인.
 
 # Deep Work Status
 
@@ -44,7 +31,7 @@ Display the current state of the Deep Work session and session history.
 
 ## Language
 
-Detect the user's language from their messages or the Claude Code `language` setting. **Output ALL user-facing messages in the detected language.** The display templates below use Korean as the reference format — translate naturally to the user's language while preserving emoji, formatting, and structure.
+Read(`${CLAUDE_PLUGIN_ROOT}/skills/shared/references/user-language.md`) and follow it.
 
 ## Instructions
 
@@ -81,13 +68,9 @@ If a flag is provided, execute the corresponding section after the default view.
 
 ### 1. Check if a session exists (multi-session aware)
 
-Resolve the current session using the following priority:
+Read(`${CLAUDE_PLUGIN_ROOT}/skills/deep-resume/references/session-detection.md`) and apply only its **Reusable session-state resolution** section to resolve `$STATE_FILE`; retain this skill's own no-session and standalone-mode behavior.
 
-1. **Environment variable**: If `DEEP_WORK_SESSION_ID` is set → read `.claude/deep-work.${DEEP_WORK_SESSION_ID}.md`
-2. **Pointer file**: If `.claude/deep-work-current-session` exists → read session ID → read `.claude/deep-work.${SESSION_ID}.md`
-3. **Legacy fallback**: Read `.claude/deep-work.local.md`
-
-If none of the above resolves to an existing state file, display:
+If resolution returns `none` or `invalid-explicit`, display:
 
 ```
 ℹ️ 활성화된 Deep Work 세션이 없습니다.
@@ -367,4 +350,3 @@ Sub-flags:
 `--badge`(shields.io 품질 뱃지) 또는 `--risk`(governed risk & policy) 요청 시 같은 파일
 `${CLAUDE_PLUGIN_ROOT}/skills/deep-status/references/flag-views.md`
 의 해당 절을 읽고 그대로 수행한다.
-

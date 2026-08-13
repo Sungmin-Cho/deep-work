@@ -24,6 +24,12 @@ function byteSort(values) {
 
 function sha256(value) { return crypto.createHash('sha256').update(value).digest('hex'); }
 
+function implementProgressComplete(plan) {
+  const slices=(plan?.slices||[]).filter((row) =>
+    row?.slice_kind !== 'release-verification');
+  return slices.length > 0 && slices.every((row) => row.checked === true);
+}
+
 function isTestPath(file) {
   return /(?:^|\/)(?:tests?|__tests__|fixtures|__mocks__)(?:\/|$)|(?:\.test|\.spec)\.[^/]+$/i.test(file);
 }
@@ -120,7 +126,8 @@ function validatePlanScopeV1(input) {
   }
   const sliceIds = new Set();
   const slices = input.slices.map((slice) => {
-    if (!slice || !/^SLICE-\d{3}$/.test(slice.id || '') || slice.scope_schema_version !== 1 ||
+    if (!slice || !/^SLICE-\d{3}$/.test(slice.id || '') ||
+        typeof slice.checked !== 'boolean' || slice.scope_schema_version !== 1 ||
         !slice.write_scope || typeof slice.write_scope !== 'object') fail('plan-scope-schema');
     if (sliceIds.has(slice.id)) fail('plan-scope-duplicate-slice');
     sliceIds.add(slice.id);
@@ -153,6 +160,8 @@ function validatePlanScopeV1(input) {
 
 function compileImmutablePlanAuthorityV2(input) {
   if(!input||input.schema_version!==2||!Array.isArray(input.slices)||!input.slices.length)
+    fail('plan-authority-v2');
+  if(input.slices.some((slice)=>typeof slice?.checked!=='boolean'))
     fail('plan-authority-v2');
   const sliceIds=new Set(input.slices.map((row)=>row.id));
   const capabilityFacts=require('./contract-runtime.js').validateCapabilityFactsV1(input.capability_facts,{sliceIds});
@@ -287,6 +296,7 @@ module.exports = {
   validateAssignment,
   publishDelegationScope,
   deriveScopedWriteAuthority,
+  implementProgressComplete,
   compilePlanProjectionV1,
   compileImmutablePlanAuthorityV2,
   publishPlanProjectionV1,

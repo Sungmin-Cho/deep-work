@@ -3,7 +3,8 @@
 const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
-const {canonicalJson}=require('./operation-journal.js');
+const journal=require('./operation-journal.js');
+const {canonicalJson}=journal;
 
 const DIGEST=/^[0-9a-f]{64}$/;
 const POINTS=['finish-finalize','finish-pre-action','test'];
@@ -19,6 +20,13 @@ function exactKeys(value,keys){return value&&typeof value==='object'&&!Array.isA
   canonicalJson(Object.keys(value).sort())===canonicalJson([...keys].sort());}
 function sorted(values){return [...new Set(values||[])].sort((a,b)=>
   Buffer.compare(Buffer.from(a),Buffer.from(b)));}
+function deriveAdmissionSatisfiedGateIds(summary,satisfied=[],{humanAckSatisfied=false}={}){
+  const projected=[...satisfied];
+  if(summary?.complete===true)projected.push('GATE-evidence-completeness');
+  if(summary?.redaction?.passed===true)projected.push('GATE-redaction');
+  if(humanAckSatisfied===true)projected.push('GATE-human-ack');
+  return sorted(projected);
+}
 function exactSorted(values){return Array.isArray(values)&&
   canonicalJson(values)===canonicalJson(sorted(values));}
 function assertDigestOrNull(value){return value===null||DIGEST.test(value||'');}
@@ -136,8 +144,8 @@ function blockersFor(point,context){
     if(context.evidence.status==='invalidated')out.push('evidence-invalidated');
     if(context.residualRisk.status!=='accepted')out.push('residual-risk-unaccepted');
     if(context.findings.status==='unknown')out.push('finding-required-unknown');
-    if(context.receipts.status==='unknown'||context.receipts.rows.some((row)=>
-      ['legacy-read-only','unknown'].includes(row.status)))out.push('receipt-invalid');
+    if(context.receipts.status!=='complete'||context.receipts.rows.some((row)=>
+      row.status!=='complete'))out.push('receipt-invalid');
     if(context.requiredGateIds.some((id)=>!context.satisfiedGateIds.includes(id)))
       out.push('gate-missing');
     if(context.redactionFailed)out.push('redaction-failed');
@@ -229,6 +237,54 @@ function readBoundedCanonical(file,code,max=4_194_304){
   if(!bytes.equals(Buffer.from(canonicalJson(value))))fail(code);
   return value;
 }
+function readBoundedJson(file,code,max=4_194_304){
+  let stat,bytes,value;try{stat=fs.lstatSync(file);bytes=fs.readFileSync(file);
+    value=JSON.parse(bytes);}catch{fail(code);}
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>max)fail(code);
+  return value;
+}
+function authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
+  project,sessionId,fields}={}){
+  const expected=(plan.slices||[]).filter((row)=>row.slice_kind==='functional')
+    .map((row)=>row.id).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const refs=checked?.functional_receipts;
+  if(!Array.isArray(refs)||canonicalJson(refs.map((row)=>row?.slice_id))!==
+      canonicalJson(expected))fail('governed-release-functional');
+  const runtime=require('./functional-receipt-runtime.js');
+  for(const ref of refs){
+    const slice=plan.slices.find((row)=>row.id===ref.slice_id);
+    const relative=`.deep-work/${sessionId}/receipts/${ref.slice_id}.json`;
+    const file=path.join(workDir,'receipts',`${ref.slice_id}.json`);
+    const receipt=runtime.validateFunctionalSliceReceiptV2(
+      readBoundedCanonical(file,'governed-release-functional',1_048_576));
+    const invalidation=runtime.recoveryInvalidationState({
+      projectCapability:project,sessionId,sliceId:ref.slice_id});
+    runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
+      receipt,requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+        ref.slice_id,invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
+    const producer=journal.lookupCompletedOperation({projectCapability:project,
+      operationId:ref.completion_operation_id,sessionId,
+      kind:'functional-slice-complete-v2'});
+    const result=producer?.result;
+    if(slice?.checked!==true||receipt.slice_id!==ref.slice_id||
+        receipt.receipt_sha256!==ref.receipt_sha256||
+        receipt.completion_operation_id!==ref.completion_operation_id||
+        receipt.plan_authority_sha256!==plan.plan_authority_sha256||
+        receipt.verification_plan_sha256!==fields.verification_plan_sha256||
+        producer?.stage!=='completed-ledger'||!exactKeys(result,
+          ['session_id','slice_id','receipt_path','receipt_sha256',
+            'post_state_sha256'])||result.session_id!==sessionId||
+        result.slice_id!==ref.slice_id||result.receipt_path!==relative||
+        result.receipt_sha256!==ref.receipt_sha256||
+        !DIGEST.test(result.post_state_sha256||'')||
+        producer.resultSha256!==journal.sha256(canonicalJson(result)))
+      fail('governed-release-functional');
+  }
+  return true;
+}
 function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
   const rows=[];let unknown=false,incomplete=false;
   const transaction=require('./transaction-runtime.js');
@@ -239,14 +295,40 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
     const file=path.join(workDir,'receipts',`${slice.id}.json`);
     let status='pending',receiptSha256=null;
     if(fs.existsSync(file)){
-      let raw;try{raw=readBoundedCanonical(file,'governed-receipt',1_048_576);}
-      catch{raw=null;}
+      let raw,canonicalBytes=true;try{raw=readBoundedCanonical(file,
+        'governed-receipt',1_048_576);}catch{canonicalBytes=false;
+        try{raw=readBoundedJson(file,'governed-receipt',1_048_576);}catch{raw=null;}}
       const value=raw?.payload||raw;
       if(!value){status='unknown';unknown=true;}
-      else if(value.schema_version===2){
-        try{
-          const checked=require('./functional-receipt-runtime.js')
-            .validateFunctionalSliceReceiptV2(value);
+      else if(slice.slice_kind==='functional'&&value.status==='invalidated'){
+        try{const runtime=require('./functional-receipt-runtime.js');
+          const invalidation=runtime.recoveryInvalidationState({
+            projectCapability:project,sessionId,sliceId:slice.id});
+          runtime.reconstructInvalidatedFunctionalReceipt({legacy:value,sessionId,
+            sliceId:slice.id,plan,verificationPlanSha256:
+            fields.verification_plan_sha256});
+          runtime.authenticateFunctionalReceiptBinding({fields,sliceId:slice.id,
+            invalidated:true,
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+              slice.id,invalidation.floor,invalidation.historyComplete),
+            minRecoveryGeneration:invalidation.floor,
+            invalidatedReceiptIdentities:invalidation.identities,
+            invalidationHistoryComplete:invalidation.historyComplete});
+          status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
+        }catch{status='unknown';unknown=true;}
+      }else if(value.schema_version===2){
+        if(!canonicalBytes){status='unknown';unknown=true;}else try{
+          const runtime=require('./functional-receipt-runtime.js');
+          const checked=runtime.validateFunctionalSliceReceiptV2(value);
+          const invalidation=runtime.recoveryInvalidationState({
+            projectCapability:project,sessionId,sliceId:slice.id});
+          runtime.authenticateFunctionalReceiptBinding({fields,
+            sliceId:slice.id,receipt:checked,
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+              slice.id,invalidation.floor,invalidation.historyComplete),
+            minRecoveryGeneration:invalidation.floor,
+            invalidatedReceiptIdentities:invalidation.identities,
+            invalidationHistoryComplete:invalidation.historyComplete});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -254,7 +336,8 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
             operationId:checked.completion_operation_id,sessionId,
             kind:'functional-slice-complete-v2'});
           const result=producer?.result;
-          if(checked.slice_id!==slice.id||checked.slice_kind!=='functional'||
+          if(slice.checked!==true||checked.slice_id!==slice.id||
+              checked.slice_kind!=='functional'||
               checked.plan_authority_sha256!==plan.plan_authority_sha256||
               checked.verification_plan_sha256!==
                 fields.verification_plan_sha256||
@@ -271,10 +354,33 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
           status='complete';receiptSha256=checked.receipt_sha256;
         }catch{status='unknown';unknown=true;}
       }else if(slice.slice_kind==='release-verification'&&
-          value.schema_version===1){
-        try{
-          const checked=require('./release-gate-runtime.js')
-            .validateReleaseVerificationReceipt(value);
+          (value.schema_version===1||value.schema_version==='1.0')){
+        if(value.schema_version===1&&!canonicalBytes){status='unknown';unknown=true;}
+        else try{
+          const releaseRuntime=require('./release-gate-runtime.js');
+          // Legacy string-schema receipts may be pretty-printed and are
+          // normalized only after their self-digest and producer checks.
+          if(releaseRuntime.isInvalidatedReleaseReceipt(value)){
+            const reconstructed=releaseRuntime
+              .reconstructInvalidatedReleaseReceipt(value);
+            if(reconstructed.slice_id!==slice.id||
+                reconstructed.plan_authority_sha256!==
+                  plan.plan_authority_sha256||
+                reconstructed.verification_plan_sha256!==
+                  fields.verification_plan_sha256)
+              fail('governed-release-authority');
+            status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
+            rows.push({slice_id:slice.id,slice_kind:slice.slice_kind||'functional',
+              status,receipt_sha256:receiptSha256});continue;
+          }
+          const checked=releaseRuntime.normalizeReleaseVerificationReceipt(value);
+          authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
+            project,sessionId,fields});
+          const expectedOperationId=releaseRuntime.releaseVerificationOperationId({
+            sessionId,sliceId:slice.id,current:plan,fields,
+            gateResults:checked.gate_results,
+            functional:checked.functional_receipts,
+            projectCapability:project});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -283,6 +389,7 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
             kind:'release-verification-complete'});
           const result=producer?.result;
           if(checked.slice_id!==slice.id||slice.checked!==true||
+              checked.completion_operation_id!==expectedOperationId||
               checked.plan_authority_sha256!==plan.plan_authority_sha256||
               checked.verification_plan_sha256!==
                 fields.verification_plan_sha256||
@@ -388,8 +495,22 @@ function loadGovernedContext({stateCapability}={}){
   const invalidations=storedInvalidations.map((row)=>{
     const copy=structuredClone(row);delete copy.schema_version;return copy;});
   if(activeReplan)warnings.push('invalidation-active');
+  const humanAckRequired=verificationPlan?.risk_class==='critical';
+  const finalPoint=reviewExecution.points?.final;
+  const finalPlan=finalPoint?.review_plan||finalPoint?.plan||finalPoint;
+  const finalAckRequired=finalPoint!==undefined&&(
+    finalPoint?.human_ack?.required===true||
+    finalPoint?.human_ack_required===true||
+    finalPoint?.human_gate?.required===true||
+    finalPlan?.risk_class==='critical'||finalPlan?.profile==='critical');
+  const finalAck=finalPoint?.human_ack;
+  const finalAckSatisfied=finalAckRequired&&finalAck?.required===true&&
+    typeof finalAck.at==='string'&&finalAck.at.length>0&&
+    finalAck.actor==='human';
+  const humanAckSatisfied=!humanAckRequired||finalAckSatisfied&&
+    reviewGate.blocking.missing_acks.length===0;
   let evidence={status:'unknown',required_ids:[],completed_ids:[],missing_ids:[],
-    invalidated_ids:[]},satisfied=[],evidenceSummary=null;
+    invalidated_ids:[]},satisfied=[],admissionSatisfied=[],evidenceSummary=null;
   if(verificationPlan){
     evidence.required_ids=sorted(verificationPlan.evidence_required_gate_ids);
     try{
@@ -401,6 +522,8 @@ function loadGovernedContext({stateCapability}={}){
           {artifactRoot:workDir});
         evidenceSummary=summary;
         satisfied=sorted(summary.satisfied_gate_ids);
+        admissionSatisfied=deriveAdmissionSatisfiedGateIds(summary,satisfied,
+          {humanAckSatisfied:humanAckRequired&&humanAckSatisfied});
         evidence={status:summary.complete?'complete':'incomplete',
           required_ids:sorted(verificationPlan.evidence_required_gate_ids),
           completed_ids:satisfied,missing_ids:sorted(summary.missing_gate_ids),
@@ -442,16 +565,12 @@ function loadGovernedContext({stateCapability}={}){
   const policy=require('./verification-policy-runtime.js');
   const requiredByPoint=Object.fromEntries(POINTS.map((point)=>[point,verificationPlan?
     policy.requiredGateIds(verificationPlan,{at:point==='test'?'test':'finish'}):[]]));
-  const satisfiedByPoint=Object.fromEntries(POINTS.map((point)=>[point,satisfied]));
-  const humanAckRequired=verificationPlan?.risk_class==='critical';
-  const hasRequiredHumanAck=Object.values(reviewExecution.points||{}).some((point)=>
-    point?.human_ack?.required===true);
+  const satisfiedByPoint=Object.fromEntries(POINTS.map((point)=>[point,admissionSatisfied]));
   const built=buildProgressProjectionV1({plan_identity:planIdentity,evidence,
     residual_risk:residualRisk,replan,invalidations,findings,receipts,
     required_gates_by_point:requiredByPoint,satisfied_gates_by_point:satisfiedByPoint,
     warnings:sorted(warnings),human_ack_required:humanAckRequired,
-    human_ack_satisfied:!humanAckRequired||hasRequiredHumanAck&&
-      reviewGate.blocking.missing_acks.length===0,
+    human_ack_satisfied:humanAckSatisfied,
     external_change_lock:reviewGate.blocking.external_change_lock,
     redaction_failed:warnings.includes('evidence-pointer-stale')});
   return{...built,plan,verificationPlan,sessionId:sid,workDir};
@@ -485,4 +604,5 @@ function validateSessionAuthority({stateCapability}={}){
 }
 
 module.exports={buildProgressProjectionV1,validateProgressProjectionV1,
-  selectGovernedAdmission,loadGovernedContext,validateSessionAuthority};
+  deriveAdmissionSatisfiedGateIds,selectGovernedAdmission,loadGovernedContext,
+  receiptProjection,validateSessionAuthority};

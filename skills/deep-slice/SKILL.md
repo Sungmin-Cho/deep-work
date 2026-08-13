@@ -4,15 +4,6 @@ description: "Slice-level management inside Phase 3 — status, activate, spike,
 user-invocable: true
 ---
 
-## Invocation
-
-이 스킬은 두 가지 경로로 호출됩니다 — 어느 쪽이든 본 SKILL 본문의 절차를 그대로 실행합니다:
-
-1. **Claude Code 슬래시** — 사용자가 `/deep-slice [args...]` 입력 (skill 의 `user-invocable: true` 가 슬래시 진입을 허용).
-2. **타 에이전트 / Codex / Copilot CLI / Gemini CLI / SDK** — `Skill({ skill: "deep-work:deep-slice", args: "..." })` 형태로 명시 invoke (cross-platform 표준 경로).
-
-두 경로 모두 args 는 동일한 토큰 문자열로 전달되며, 본문 (`$ARGUMENTS` 자리) 의 파서가 동일하게 처리합니다.
-
 ## Inputs (skill args)
 
 | 인자 | 의미 |
@@ -27,10 +18,6 @@ user-invocable: true
 
 ## Prerequisites
 
-이 entry skill 은 `deep-work-orchestrator` (Phase dispatch) 및 `deep-work-workflow` (reference skill — Phase 규약/Exit Gate/M3 envelope) 와 함께 동작합니다. 활성 deep-work 세션이 있을 때는 세션 state file (`.claude/deep-work.<SESSION_ID>.md`) 의 변수 (`work_dir`, `current_phase`, `active_slice` 등) 를 읽어 동작하며, 세션 외부에서도 standalone 실행이 가능한 경우 본문의 분기를 따릅니다.
-
-**Cross-platform self-containment**: Claude Code 에서는 sibling skill 이 description 매칭으로 자동 로드됩니다. Codex / Copilot CLI / Gemini CLI / Agent SDK 에서 `Skill()` 로 호출 시 sibling auto-load 보장이 약할 수 있으므로, 본문은 self-contained 으로 보존되어 있습니다 — state file 해석, `$ARGUMENTS` 파싱, AskUserQuestion 분기, 출력 포맷이 인라인.
-
 
 > **Escape hatch utility** — TDD 블록 시 `phase-guard`가 안내하는 수동 slice 개입 경로 (`spike`, `reset`, `model`). `/deep-implement` auto-flow가 정상 동작할 때는 대부분 자동 관리됩니다.
 > 참조처: `${CLAUDE_PLUGIN_ROOT}/hooks/scripts/phase-guard-core.js` L110-L123 (TDD 블록 메시지에서 `/deep-slice spike/reset` 안내).
@@ -41,7 +28,7 @@ Manage slices within a Deep Work implementation session.
 
 ## Language
 
-Detect the user's language from their messages or the Claude Code `language` setting. Output ALL user-facing messages in the detected language.
+Read(`${CLAUDE_PLUGIN_ROOT}/skills/shared/references/user-language.md`) and follow it.
 
 ## Usage
 
@@ -53,12 +40,7 @@ Detect the user's language from their messages or the Claude Code `language` set
 
 ## Slice Status Dashboard
 
-Resolve the current session's state file:
-1. If `DEEP_WORK_SESSION_ID` env var is set → `.claude/deep-work.${DEEP_WORK_SESSION_ID}.md`
-2. If `.claude/deep-work-current-session` pointer file exists → read session ID → `.claude/deep-work.${SESSION_ID}.md`
-3. Legacy fallback → `.claude/deep-work.local.md`
-
-Set `$STATE_FILE` to the resolved path.
+Read(`${CLAUDE_PLUGIN_ROOT}/skills/deep-resume/references/session-detection.md`) and apply only its **Reusable session-state resolution** section to resolve `$STATE_FILE`; retain this skill's own no-session and standalone-mode behavior.
 
 Read `$STATE_FILE` and `$WORK_DIR/plan.md` to display:
 

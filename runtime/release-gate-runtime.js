@@ -11,6 +11,14 @@ const platform=require('./platform.js');
 
 const DIGEST=/^[0-9a-f]{64}$/;
 const OPERATION=/^op-[0-9a-f]{64}$/;
+const RELEASE_RECEIPT_KEYS=['schema_version','slice_id','plan_authority_sha256',
+  'verification_plan_sha256','gate_results','functional_receipts',
+  'completion_operation_id','receipt_sha256'];
+const LEGACY_RELEASE_RECEIPT_KEYS=[...RELEASE_RECEIPT_KEYS,
+  'estimated_cost','git_after','git_before','goal','model_auto_selected',
+  'model_override_reason','model_used','tdd_mode','worktree_branch'];
+const LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS=[...LEGACY_RELEASE_RECEIPT_KEYS,
+  'status'];
 const SEMVER=/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 function fail(code,message=code){const error=new Error(`[${code}] ${message}`);
   error.code=code;throw error;}
@@ -39,7 +47,7 @@ const RELEASE_GATE_CATALOG=Object.freeze({
     'runtime/verification-runtime.test.js','runtime/phase-runtime.test.js',
     'runtime/slice-runtime.test.js','hooks/scripts/verify-receipt-core.test.js']),
   gate_ids:Object.freeze(['GATE-negative-tests','GATE-permission-negative',
-    'GATE-receipt-completeness','GATE-targeted-tests','GATE-tdd-green',
+    'GATE-receipt-completeness','GATE-tdd-green',
     'GATE-tdd-red'])}),
   replan:Object.freeze({argv:Object.freeze(['node','--test',
     'runtime/phase-runtime.test.js','runtime/slice-runtime.test.js',
@@ -52,8 +60,15 @@ const RELEASE_GATE_CATALOG=Object.freeze({
     'tests/v6.13-spec-evidence-integration.test.js']),
   gate_ids:Object.freeze(['GATE-e2e-entrypoint','GATE-host-smoke',
     'GATE-relevant-integration'])}),
+  targeted:Object.freeze({argv:Object.freeze(['node','--test',
+    'runtime/functional-receipt-runtime.test.js',
+    'tests/context-engineering-context-contract.test.js',
+    'tests/context-engineering-receipt-contract.test.js',
+    'tests/skill-reference-integrity.test.js']),
+  gate_ids:Object.freeze(['GATE-context-contract','GATE-receipt-lock-order',
+    'GATE-reference-integrity','GATE-targeted-tests'])}),
   full:Object.freeze({argv:Object.freeze(['npm','test']),
-    gate_ids:Object.freeze(['GATE-full-relevant-suite'])}),
+    gate_ids:Object.freeze(['GATE-full-relevant-suite','GATE-full-suite'])}),
   pack:Object.freeze({argv:Object.freeze(['npm','pack','--dry-run','--json']),
     gate_ids:Object.freeze(['GATE-fresh-install-build'])}),
 });
@@ -416,6 +431,13 @@ function readCanonical(file,code){
   if(!bytes.equals(Buffer.from(canonical(value))))fail(code);
   return{value,bytes,sha256:journal.sha256(bytes)};
 }
+function readReleaseReceipt(file,code){
+  let stat,bytes,value;try{stat=fs.lstatSync(file);bytes=fs.readFileSync(file);
+    value=JSON.parse(bytes);}catch{fail(code);}
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)
+    fail(code);
+  return{value,bytes,sha256:journal.sha256(bytes)};
+}
 function writeExclusive(file,value,code){
   const bytes=Buffer.from(canonical(value));fs.mkdirSync(path.dirname(file),{recursive:true});
   let fd;try{fd=fs.openSync(file,fs.constants.O_CREAT|fs.constants.O_EXCL|
@@ -424,6 +446,53 @@ function writeExclusive(file,value,code){
     fail(code);}finally{if(fd!==undefined)fs.closeSync(fd);}
   if(!fs.readFileSync(file).equals(bytes))fail(code);
   return journal.sha256(bytes);
+}
+function releaseReceiptTargetLocks({root,planPath,receiptPath}={}){
+  if(typeof root!=='string'||!root||typeof planPath!=='string'||
+      typeof receiptPath!=='string')fail('release-verification-locks');
+  const targets=[planPath,receiptPath].sort((a,b)=>Buffer.compare(
+    Buffer.from(a),Buffer.from(b)));
+  return targets.map((target)=>({rank:transaction.RANKS.target,
+    capability:platform.issueProjectStateCapability(root,path.join(root,'.claude',
+      `deep-work.target.${journal.sha256(path.relative(root,target))}.lock`),
+      {allowMissingLeaf:true,role:'lock'})})).sort((a,b)=>Buffer.compare(
+        Buffer.from(a.capability.path),Buffer.from(b.capability.path)));
+}
+async function replaceInvalidatedReleaseReceipt({stateCapability,current,fields,
+  sliceId,relative,receipt}={}){
+  const root=stateCapability.projectRoot,file=path.join(root,...relative.split('/'));
+  if(!fs.existsSync(file))return false;
+  const existingRecord=readReleaseReceipt(file,'release-verification-receipt');
+  const rawExisting=existingRecord.value;
+  if(rawExisting.status!=='invalidated')return false;
+  let existing;
+  try{existing=reconstructInvalidatedReleaseReceipt(rawExisting);}
+  catch{fail('release-verification-receipt');}
+  if(existing.slice_id!==sliceId||
+      existing.plan_authority_sha256!==current.plan_authority_sha256||
+      existing.verification_plan_sha256!==fields.verification_plan_sha256||
+      !DIGEST.test(existing.receipt_sha256||'')||
+      !Array.isArray(existing.gate_results)||
+      !Array.isArray(existing.functional_receipts))
+    fail('release-verification-receipt');
+  if(existing.receipt_sha256===receipt.receipt_sha256||
+      existing.completion_operation_id===receipt.completion_operation_id)
+    fail('release-verification-recovery-required');
+  const nextBytes=Buffer.from(canonical(receipt));
+  const workDir=path.join(root,...String(fields.work_dir).split('/'));
+  const sessionCapability=platform.issueProjectStateCapability(root,workDir,
+    {role:'session-work-dir',sessionStateCapability:stateCapability});
+  const capability=transaction.issueSessionFileCapability({sessionCapability,
+    candidate:file,allowedBasenames:[path.basename(file)],
+    role:'release-verification-receipt'});
+  // The caller has authenticated a new gate-result identity. The ranked target
+  // lock serializes invalidation and replacement; this byte comparison rejects
+  // any state drift observed before the atomic rename.
+  if(!fs.readFileSync(file).equals(existingRecord.bytes))
+    fail('release-verification-receipt');
+  transaction.atomicWriteSessionFile(capability,nextBytes);
+  if(!fs.readFileSync(file).equals(nextBytes))fail('release-verification-receipt');
+  return true;
 }
 function loadPlan(planCapability,plan){
   transaction.revalidateSessionFile(planCapability);
@@ -435,6 +504,42 @@ function loadPlan(planCapability,plan){
   if(authority.plan_authority_sha256!==current.plan_authority_sha256)
     fail('gate-plan');
   return current;
+}
+function buildReleaseVerificationCompletionPreconditions({sessionId,sliceId,current,
+  fields,gateResults,functional,projectCapability}={}){
+  const preconditions={session_id:sessionId,slice_id:sliceId,
+    plan_authority_sha256:current.plan_authority_sha256,
+    verification_plan_sha256:fields.verification_plan_sha256,
+    gate_results:gateResults,functional_receipts:functional};
+  let retryGeneration;try{
+      const runtime=require('./functional-receipt-runtime.js');
+      retryGeneration=runtime.recoveryGenerationFromFields(fields);
+      if(projectCapability){
+        const history=runtime.recoveryGenerationFloor({projectCapability,sessionId});
+        if(history.hasRows&&!Object.hasOwn(fields,
+            'receipt_recovery_generation')||!history.historyComplete||
+            retryGeneration<history.floor)
+          fail('release-verification-state');
+      retryGeneration=Math.max(retryGeneration,history.floor);
+    }
+  }catch(error){
+    if(error.code==='release-verification-state')throw error;
+    fail('release-verification-state');
+  }
+  if(retryGeneration>0)preconditions.retry_generation=retryGeneration;
+  return preconditions;
+}
+function releaseVerificationOperationId(args){
+  return operationId('release-verification-complete-v1',
+    buildReleaseVerificationCompletionPreconditions(args));
+}
+function assertStoredReleaseVerificationReceipt(file,receipt,code='release-verification-recovery'){
+  if(!fs.existsSync(file))fail(code);
+  const raw=readReleaseReceipt(file,code).value;
+  if(raw.status==='invalidated')fail(code);
+  let stored;try{stored=normalizeReleaseVerificationReceipt(raw);}catch{fail(code);}
+  if(canonical(stored)!==canonical(receipt))fail(code);
+  return stored;
 }
 function producerBindsInputRef({producer,ref,planAuthoritySha256,
   verificationPlanSha256}={}){
@@ -737,6 +842,17 @@ function releaseDocsRulePath(root,toolchain){
   if(!fs.existsSync(fallback))fail('release-integrity-docs-rule');
   return fallback;
 }
+function legacyV7SurfaceViolations({activeVersion,versions}={}){
+  if(!SEMVER.test(String(activeVersion||''))||!Array.isArray(versions)||
+      versions.some((row)=>!Array.isArray(row)||row.length!==2||
+        typeof row[0]!=='string'||!row[0]||!SEMVER.test(String(row[1]||''))))
+    fail('release-integrity-manifest');
+  const activeMajor=Number.parseInt(String(activeVersion).split('.')[0],10);
+  if(!Number.isSafeInteger(activeMajor)||activeMajor>=7)return[];
+  return versions.filter(([,version])=>/^7\./.test(String(version)))
+    .map(([file])=>file).sort((a,b)=>Buffer.compare(Buffer.from(a),
+      Buffer.from(b)));
+}
 function releaseIntegrityValues({stateCapability}={}){
   const root=stateCapability.projectRoot;
   const toolchain=require('./release-toolchain-runtime.js');
@@ -761,9 +877,7 @@ function releaseIntegrityValues({stateCapability}={}){
   if(!/^[0-9a-f]{40}$/.test(head)||!branch)fail('release-integrity-git');
   const versions=[['.claude-plugin/plugin.json',claude.version],
     ['.codex-plugin/plugin.json',codex.version],['package.json',pkg.version]];
-  const v7=versions.filter(([,version])=>/^7\./.test(String(version)))
-    .map(([file])=>file).sort((a,b)=>Buffer.compare(Buffer.from(a),
-      Buffer.from(b)));
+  const v7=legacyV7SurfaceViolations({activeVersion:pkg.version,versions});
   const external=journal.inspectExternalEffectOperationIds({
     projectCapability:transaction.projectCapabilityFor(stateCapability),
     sessionId:transaction.sessionIdFromState(stateCapability)});
@@ -1031,6 +1145,8 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
   const project=transaction.projectCapabilityFor(stateCapability);
   const sid=transaction.sessionIdFromState(stateCapability),runtime=
     require('./functional-receipt-runtime.js');
+  const fields=frontmatter.parseFrontmatter(
+    fs.readFileSync(stateCapability.path,'utf8')).fields;
   for(const ref of refs){
     const relative=`.deep-work/${sid}/receipts/${ref.slice_id}.json`;
     const raw=readCanonical(path.join(stateCapability.projectRoot,
@@ -1039,12 +1155,26 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
     const producer=await journal.resumeOperation({projectCapability:project,
       operationId:ref.completion_operation_id,sessionId:sid,
       kind:'functional-slice-complete-v2'});
+    const invalidation=runtime.recoveryInvalidationState({
+      projectCapability:project,sessionId:sid,sliceId:ref.slice_id});
+    runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
+      receipt,requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+        ref.slice_id,invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
+    const result=producer.result;
     if(receipt.receipt_sha256!==ref.receipt_sha256||
         receipt.completion_operation_id!==ref.completion_operation_id||
         receipt.plan_authority_sha256!==plan.plan_authority_sha256||
         producer.stage!=='completed-ledger'||
-        producer.result?.receipt_path!==relative||
-        producer.result?.receipt_sha256!==ref.receipt_sha256)
+        !exactKeys(result,['session_id','slice_id','receipt_path',
+          'receipt_sha256','post_state_sha256'])||
+        result.session_id!==sid||result.slice_id!==ref.slice_id||
+        result.receipt_path!==relative||
+        result.receipt_sha256!==ref.receipt_sha256||
+        !DIGEST.test(result.post_state_sha256||'')||
+        producer.resultSha256!==journal.sha256(canonical(result)))
       fail('release-verification-functional');
   }
   return structuredClone(refs);
@@ -1052,9 +1182,7 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
 function releaseReceiptDigest(value){const copy=structuredClone(value);
   delete copy.receipt_sha256;return journal.sha256(canonical(copy));}
 function validateReleaseVerificationReceipt(value){
-  if(!exactKeys(value,['schema_version','slice_id','plan_authority_sha256',
-    'verification_plan_sha256','gate_results','functional_receipts',
-    'completion_operation_id','receipt_sha256'])||value.schema_version!==1||
+  if(!exactKeys(value,RELEASE_RECEIPT_KEYS)||value.schema_version!==1||
       !/^SLICE-\d{3}$/.test(value.slice_id||'')||
       !DIGEST.test(value.plan_authority_sha256||'')||
       !DIGEST.test(value.verification_plan_sha256||'')||
@@ -1073,8 +1201,81 @@ function validateReleaseVerificationReceipt(value){
     fail('release-verification-receipt');
   return structuredClone(value);
 }
+function reconstructInvalidatedReleaseReceipt(value){
+  if(!value||value.status!=='invalidated')fail('release-verification-recovery');
+  let candidate;
+  if(value.schema_version===1){
+    candidate=structuredClone(value);delete candidate.status;
+  }else if(value.schema_version==='1.0'){
+    if(!exactKeys(value,LEGACY_INVALIDATED_RELEASE_RECEIPT_KEYS))
+      fail('release-verification-recovery');
+    candidate=Object.fromEntries(RELEASE_RECEIPT_KEYS.map((key)=>
+      [key,value[key]]));candidate.schema_version=1;
+  }else fail('release-verification-recovery');
+  try{validateReleaseVerificationReceipt(candidate);}catch{
+    fail('release-verification-recovery');
+  }
+  if(candidate.receipt_sha256!==value.receipt_sha256)
+    fail('release-verification-recovery');
+  return candidate;
+}
+function normalizeReleaseVerificationReceipt(value){
+  if(value?.status==='invalidated')return reconstructInvalidatedReleaseReceipt(value);
+  let candidate;
+  if(value?.schema_version===1&&exactKeys(value,RELEASE_RECEIPT_KEYS))
+    candidate=structuredClone(value);
+  else if(value?.schema_version==='1.0'&&
+      exactKeys(value,LEGACY_RELEASE_RECEIPT_KEYS)){
+    candidate=Object.fromEntries(RELEASE_RECEIPT_KEYS.map((key)=>
+      [key,value[key]]));candidate.schema_version=1;
+  }else fail('release-verification-receipt');
+  try{validateReleaseVerificationReceipt(candidate);}catch{
+    fail('release-verification-receipt');
+  }
+  if(candidate.receipt_sha256!==value.receipt_sha256)
+    fail('release-verification-receipt');
+  return candidate;
+}
+function isInvalidatedReleaseReceipt(value){
+  try{reconstructInvalidatedReleaseReceipt(value);return true;}catch{return false;}
+}
+function validateReleaseCompletionLedger(completed,{sliceId,receiptRelative,
+  receipt,operationId}={}){
+  const result=completed?.result;
+  if(completed?.stage!=='completed-ledger'||!exactKeys(result,
+      ['slice_id','receipt_path','receipt_sha256','post_state_sha256'])||
+      result.slice_id!==sliceId||result.receipt_path!==receiptRelative||
+      result.receipt_sha256!==receipt.receipt_sha256||
+      !DIGEST.test(result.post_state_sha256||'')||
+      receipt.completion_operation_id!==operationId||
+      completed.resultSha256!==journal.sha256(canonical(result)))
+    fail('release-verification-adoption');
+  return result;
+}
 async function publishReleaseVerificationReceipt({stateCapability,planCapability,plan,
-  sliceId,gateResults,functionalReceipts,seam}={}){
+  sliceId,gateResults,functionalReceipts,seam,_locksHeld=false}={}){
+  if(!_locksHeld){
+    const root=stateCapability?.projectRoot;
+    const sid=transaction.sessionIdFromState(stateCapability);
+    const fields=frontmatter.parseFrontmatter(
+      fs.readFileSync(stateCapability.path,'utf8')).fields;
+    if(typeof fields.work_dir!=='string')fail('release-verification-state');
+    const receiptPath=path.join(root,...fields.work_dir.split('/'),'receipts',
+      `${sliceId}.json`);
+    const locks=releaseReceiptTargetLocks({root,planPath:planCapability.path,
+      receiptPath});
+    return transaction.withRankedLocks([
+      {rank:transaction.RANKS.session,capability:platform.issueProjectStateCapability(
+        root,path.join(root,'.claude',`deep-work.${sid}.rank-operation.lock`),
+        {allowMissingLeaf:true,role:'lock'})},
+      {rank:transaction.RANKS.journal,capability:platform.issueProjectStateCapability(
+        root,path.join(root,'.claude',`deep-work.${sid}.rank-journal.lock`),
+        {allowMissingLeaf:true,role:'lock'})},
+      {rank:transaction.RANKS.state,capability:transaction.stateLock(stateCapability)},
+      ...locks,
+    ],()=>publishReleaseVerificationReceipt({stateCapability,planCapability,plan,
+      sliceId,gateResults,functionalReceipts,seam,_locksHeld:true}));
+  }
   const current=loadPlan(planCapability,plan),sid=
     transaction.sessionIdFromState(stateCapability);
   const fields=frontmatter.parseFrontmatter(
@@ -1092,23 +1293,12 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     fail('release-verification-gates');
   const functional=await authenticateFunctionalReceiptRefs({stateCapability,
     plan:current,refs:functionalReceipts});
-  const preconditions={session_id:sid,slice_id:sliceId,
-    plan_authority_sha256:current.plan_authority_sha256,
-    verification_plan_sha256:fields.verification_plan_sha256,
-    gate_results:gateResults,functional_receipts:functional};
-  const id=operationId('release-verification-complete-v1',preconditions);
   const project=transaction.projectCapabilityFor(stateCapability);
-  const existing=await journal.resumeOperation({projectCapability:project,
-    operationId:id,sessionId:sid,kind:'release-verification-complete'}).catch(
-      (error)=>{if(error.code==='operation-not-found')return null;throw error;});
-  if(existing?.stage==='completed-ledger')return{...existing.result,
-    operation_id:id,operation_receipt:existing,adopted:true};
-  if(slice.checked)fail('release-verification-state');
-  const operation=await journal.beginOperation({projectCapability:project,
-    sessionId:sid,kind:'release-verification-complete',operationId:id,
-    preconditions});
-  await journal.recordOperationStage(operation,'aggregate-authenticated',{owned:{
-    gateCount:gateResults.length,functionalCount:functional.length}});
+  const preconditions=buildReleaseVerificationCompletionPreconditions({
+    sessionId:sid,sliceId,current,fields,gateResults,functional,
+    projectCapability:project});
+  const id=releaseVerificationOperationId({sessionId:sid,sliceId,current,fields,
+    gateResults,functional,projectCapability:project});
   const receipt={schema_version:1,slice_id:sliceId,
     plan_authority_sha256:current.plan_authority_sha256,
     verification_plan_sha256:fields.verification_plan_sha256,
@@ -1117,31 +1307,92 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     receipt_sha256:null};
   receipt.receipt_sha256=releaseReceiptDigest(receipt);
   const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
-  seam?.('before-release-receipt-write',{operationId:id,path:relative});
-  writeExclusive(path.join(stateCapability.projectRoot,...relative.split('/')),
-    receipt,'release-verification-receipt');
-  await journal.recordOperationStage(operation,'receipt-published',{owned:{
-    receiptPath:relative,receiptSha256:receipt.receipt_sha256}});
+  const existing=await journal.resumeOperation({projectCapability:project,
+    operationId:id,sessionId:sid,kind:'release-verification-complete'}).catch(
+      (error)=>{if(error.code==='operation-not-found')return null;throw error;});
+  if(existing?.stage==='completed-ledger'){
+    const receiptPath=path.join(stateCapability.projectRoot,...relative.split('/'));
+    if(!fs.existsSync(receiptPath))fail('release-verification-recovery-required');
+    const raw=readReleaseReceipt(receiptPath,'release-verification-adoption').value;
+    if(raw.status==='invalidated')fail('release-verification-recovery-required');
+    let stored;
+    try{stored=normalizeReleaseVerificationReceipt(raw);}catch{
+      fail('release-verification-adoption');
+    }
+    if(canonical(stored)!==canonical(receipt))fail('release-verification-adoption');
+    validateReleaseCompletionLedger(existing,{sliceId,receiptRelative:relative,
+      receipt,operationId:id});
+    return{...existing.result,operation_id:id,
+      operation_receipt:existing,adopted:true};
+  }
+  const pending=existing?.status==='pending';
+  if(!pending&&slice.checked!==false)fail('release-verification-state');
+  const operation=await journal.beginOperation({projectCapability:project,
+    sessionId:sid,kind:'release-verification-complete',operationId:id,
+    preconditions});
+  let operationJournal=await journal.recordOperationStage(operation,
+    'aggregate-authenticated',{owned:{
+    gateCount:gateResults.length,functionalCount:functional.length}});
+  let stages=new Set(operationJournal.stages.map((row)=>row.stage));
   const updated=structuredClone(current);
   updated.slices=updated.slices.map((row)=>row.id===sliceId?
     {...row,checked:true}:row);
   if(planRuntime.compileImmutablePlanAuthorityV2(updated).plan_authority_sha256!==
       current.plan_authority_sha256)fail('release-verification-plan');
-  transaction.atomicWriteSessionFile(planCapability,canonical(updated));
+  const receiptPath=path.join(stateCapability.projectRoot,...relative.split('/'));
+  if(!stages.has('receipt-published')){
+    let replaced=false;
+    if(fs.existsSync(receiptPath)){
+      const raw=readReleaseReceipt(receiptPath,
+        'release-verification-recovery').value;
+      if(raw.status==='invalidated')replaced=await replaceInvalidatedReleaseReceipt({
+        stateCapability,current,fields,sliceId,relative,receipt});
+      else assertStoredReleaseVerificationReceipt(receiptPath,receipt);
+    }
+    if(!replaced&&!fs.existsSync(receiptPath)){
+      seam?.('before-release-receipt-write',{operationId:id,path:relative});
+      writeExclusive(receiptPath,receipt,'release-verification-receipt');
+    }
+  }else assertStoredReleaseVerificationReceipt(receiptPath,receipt);
+  operationJournal=await journal.recordOperationStage(operation,
+    'receipt-published',{owned:{receiptPath:relative,
+      receiptSha256:receipt.receipt_sha256}});
+  stages=new Set(operationJournal.stages.map((row)=>row.stage));
+  const planBytes=Buffer.from(canonical(updated));
+  const currentPlanBytes=transaction.readSessionFile(planCapability);
+  if(stages.has('progress-committed')){
+    if(!currentPlanBytes.equals(planBytes))fail('release-verification-recovery');
+  }else if(!currentPlanBytes.equals(planBytes)){
+    seam?.('before-release-plan-write',{operationId:id});
+    transaction.atomicWriteSessionFile(planCapability,planBytes);
+    seam?.('after-release-plan-write-before-state',{operationId:id});
+  }
   const stateBefore=fs.readFileSync(stateCapability.path,'utf8');
   const stateAfter=frontmatter.updateFrontmatterText(stateBefore,{
     release_verification_receipt_sha256:receipt.receipt_sha256,
     release_verification_operation_id:id,test_passed:true});
-  platform.atomicWriteFile(stateCapability,stateAfter);
+  const currentStateFields=frontmatter.parseFrontmatter(stateBefore).fields;
+  const stateAlreadyCommitted=currentStateFields.release_verification_receipt_sha256===
+      receipt.receipt_sha256&&currentStateFields.release_verification_operation_id===id&&
+    currentStateFields.test_passed===true;
+  let finalStateBytes=Buffer.from(stateBefore);
+  if(stages.has('progress-committed')){
+    if(!stateAlreadyCommitted)fail('release-verification-recovery');
+  }else if(!stateAlreadyCommitted){
+    seam?.('before-release-state-write',{operationId:id});
+    platform.atomicWriteFile(stateCapability,stateAfter);
+    finalStateBytes=Buffer.from(stateAfter);
+    seam?.('after-release-state-write-before-stage',{operationId:id});
+  }
   await journal.recordOperationStage(operation,'progress-committed',{owned:{
-    planSha256:journal.sha256(canonical(updated)),
-    postStateSha256:journal.sha256(Buffer.from(stateAfter))}});
+    planSha256:journal.sha256(planBytes),
+    postStateSha256:journal.sha256(finalStateBytes)}});
   const result={slice_id:sliceId,receipt_path:relative,
     receipt_sha256:receipt.receipt_sha256,
-    post_state_sha256:journal.sha256(Buffer.from(stateAfter))};
+    post_state_sha256:journal.sha256(finalStateBytes)};
   const operationReceipt=await journal.completeOperation(operation,result);
   return{...result,operation_id:id,operation_receipt:operationReceipt,
-    adopted:false};
+    adopted:pending};
 }
 
 module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
@@ -1152,4 +1403,10 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   publishCommandGateResult,
   publishReleaseIntegrityGateResult,
   gateResultRefs,validateReleaseVerificationReceipt,
-  publishReleaseVerificationReceipt,semanticDigest};
+  reconstructInvalidatedReleaseReceipt,normalizeReleaseVerificationReceipt,
+  isInvalidatedReleaseReceipt,
+  validateReleaseCompletionLedger,replaceInvalidatedReleaseReceipt,
+  buildReleaseVerificationCompletionPreconditions,
+  releaseVerificationOperationId,
+  releaseReceiptTargetLocks,
+  publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};

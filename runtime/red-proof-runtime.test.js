@@ -373,6 +373,9 @@ node26Test('ordinary RED transition and proof publication authorize the exact st
     const receiptPath=path.join(f.root,...completed.receipt_path.split('/'));
     const storedReceipt=JSON.parse(fs.readFileSync(receiptPath,'utf8'));
     assert.equal(storedReceipt.schema_version,2);
+    assert.match(frontmatter.parseFrontmatter(
+      fs.readFileSync(f.statePath,'utf8')).fields.implement_completed_at,
+    /^\d{4}-\d{2}-\d{2}T/);
     const checkedPlan=JSON.parse(fs.readFileSync(f.planCapability.path,'utf8'));
     const replayed=await publishFunctionalSliceReceiptV2({
       stateCapability:f.stateCapability,planCapability:f.planCapability,
@@ -393,6 +396,13 @@ node26Test('ordinary RED transition and proof publication authorize the exact st
       stateCapability:f.stateCapability}).projection.receipts.rows
       .find((row)=>row.slice_id==='SLICE-001').status,'unknown');
     fs.writeFileSync(ledgerPath,ledgerBytes);
+    fs.writeFileSync(receiptPath,journal.canonicalJson({
+      ...storedReceipt,status:'invalidated'}));
+    await assert.rejects(publishFunctionalSliceReceiptV2({
+      stateCapability:f.stateCapability,planCapability:f.planCapability,
+      plan:checkedPlan,sliceId:'SLICE-001',greenVerification:greenRef,
+      refactorEvidence}),/functional-recovery-fresh-evidence/);
+    fs.writeFileSync(receiptPath,journal.canonicalJson(storedReceipt));
     fs.writeFileSync(receiptPath,journal.canonicalJson({
       ...storedReceipt,receipt_sha256:'0'.repeat(64)}));
     await assert.rejects(publishFunctionalSliceReceiptV2({

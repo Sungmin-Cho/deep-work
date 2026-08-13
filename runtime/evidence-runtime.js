@@ -437,9 +437,10 @@ function loadFinishGateContext(input={}){const plan=input.verificationPlan,pkg=i
   const summary=evaluateEvidenceCompleteness(pkg,plan,{artifactRoot}),invalidations=input.receiptInvalidations||[];
   const invalidatedEvidenceIds=invalidatedReceiptEvidenceIds(pkg,plan,invalidations);
   const residual=policy.computeResidualRisk({initialRisk:input.initialRisk,finalRisk:input.finalRisk,evidenceSummary:summary,
-    unverifiedAreas:summary.unverified_areas,riskAcceptances:input.riskAcceptances||[]}),satisfied=[...summary.satisfied_gate_ids];
-  if(summary.complete)satisfied.push('GATE-evidence-completeness');if(summary.redaction.passed)satisfied.push('GATE-redaction');
-  if(input.humanAckSatisfied===true)satisfied.push('GATE-human-ack');const endpoint=input.enforcementPoint||'finish';const required=
+    unverifiedAreas:summary.unverified_areas,riskAcceptances:input.riskAcceptances||[]});
+  const satisfied=require('./governed-context-runtime.js').deriveAdmissionSatisfiedGateIds(
+    summary,summary.satisfied_gate_ids,{humanAckSatisfied:input.humanAckSatisfied===true&&
+      plan.risk_class==='critical'});const endpoint=input.enforcementPoint||'finish';const required=
     policy.requiredGateIds(plan,{at:endpoint});for(const id of policy.requiredGateIds(plan,{at:'finish'})){const gate=
       plan.gates.find((row)=>row.id===id);if(gate?.enforcement_point==='test-and-finish')required.push(id);}return{
     compatibility_mode:input.compatibilityMode||plan.compatibility_mode,evidence_summary:summary,residual_risk:residual,

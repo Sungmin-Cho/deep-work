@@ -309,6 +309,9 @@ slice 종료 직전 (spec 검증 + slice review 완료 후):
 - `git_after_slice` = `git rev-parse HEAD`
 
 먼저 **legacy payload** (per-slice baseline schema)를 in-memory로 구성한다 — 다음 필수 필드:
+- **`schema_version`**: literal string `"1.0"`
+- **`slice_id`**: 현재 `SLICE-NNN`
+- **`cluster_id`** (team parallel에서 필수, solo에서는 optional): 부모가 전달한 cluster identity
 - **status** (필수): "complete" | "blocked"
 - **tdd**:
   - `state_transitions`: ["PENDING", "RED_VERIFIED", "GREEN", "SENSOR_CLEAN"] 등
@@ -348,29 +351,10 @@ node "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/wrap-receipt-envelope.js" \
 - `--source-artifacts-glob`는 session-receipt 단계에서 slice-receipt들을 intra-plugin chain으로 집계하기 위한 옵션 (deep-finish §7-Z 사용).
 - `--source-harnessability`는 cross-plugin source artifact를 `provenance.source_artifacts[]`에만 추가하고 `parent_run_id`는 건드리지 않는다.
 
-최종 파일은 다음 구조 (`AGENTS.md` §Receipt envelope과 동일):
-
-```json
-{
-  "schema_version": "1.0",
-  "envelope": {
-    "producer": "deep-work",
-    "producer_version": "<read from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json by helper>",
-    "artifact_kind": "slice-receipt",
-    "run_id": "<ULID — Crockford base32, I/L/O/U 금지>",
-    "session_id": "<dw-session-id>",
-    "parent_run_id": "<consumed evolve-insights run_id, optional>",
-    "generated_at": "<RFC 3339>",
-    "schema": { "name": "slice-receipt", "version": "1.0" },
-    "git": { "head": "<git_after_slice sha>", "branch": "<name>", "dirty": false },
-    "provenance": {
-      "source_artifacts": [{ "path": "plan.md", "run_id": "<plan run_id>" }],
-      "tool_versions": { "node": "v20.x" }
-    }
-  },
-  "payload": { /* Step D legacy v6.4.0 slice receipt body — schema_version: "1.0" preserved */ }
-}
-```
+최종 envelope 전체 스키마의 유일한 문서 권위는 `AGENTS.md` §Receipt envelope이다.
+여기서는 실행 계약만 유지한다: helper가 `producer`, `artifact_kind`, `run_id`,
+`schema.name`, Git 및 provenance 필드를 만들고 Step D의 legacy payload를 `payload`에
+넣는다. envelope를 직접 작성하거나 이 문서에 전체 스키마를 복제하지 않는다.
 
 - **Identity guard** — 모든 reader (`verify-delegated-receipt-runner.js`, `session-end.sh`, deep-test §4-1)가 `envelope.producer === "deep-work"` + `artifact_kind === "slice-receipt"` + `schema.name === artifact_kind` 3중 검증 후 `.payload`로 unwrap하여 legacy 필드를 읽는다.
 - **Self-test** — `${CLAUDE_PLUGIN_ROOT}/scripts/validate-envelope-emit.js` (zero-dep release-lint) + `tests/envelope-emit.test.js` + `tests/envelope-chain.test.js`가 corrupt payload, ULID alphabet 위반, SemVer strict, cross-plugin chain assertion을 cover.

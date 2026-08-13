@@ -79,7 +79,7 @@ const rows=[
       'evidence-redaction-v1','dual-final-review-v1','human-ack-v1']}),
   grammar('release gate result-publish',['state','plan','fact-operation-id']),
   grammar('release gate command-run',['state','plan','command'],[],{
-    command:['carrier','tdd','replan','integration','full','pack']}),
+    command:['carrier','tdd','replan','integration','targeted','full','pack']}),
   grammar('release gate integrity-run',['state','plan']),
   grammar('release verification complete',['state','plan','slice',
     'gate-results-json','functional-receipts-json']),

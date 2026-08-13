@@ -18,6 +18,213 @@ function semanticDigest(domain,value,omitted){
   return crypto.createHash('sha256').update(Buffer.concat([
     Buffer.from(`${domain}\0`),Buffer.from(canonicalJson(copy))])).digest('hex');
 }
+function validateRecoveryGenerationSequence(result,previousGeneration){
+  const generation=result?.recovery_generation;
+  if(generation===undefined)return{generation:null,previousGeneration};
+  if(!Number.isSafeInteger(generation)||generation<0||
+      previousGeneration!==null&&generation<previousGeneration)
+    fail('functional-recovery-history');
+  return{generation,previousGeneration:generation};
+}
+function recoveryGenerationFromFields(fields={}){
+  const retry=fields.test_retry_count===undefined?0:fields.test_retry_count;
+  const persistedPresent=Object.hasOwn(fields,'receipt_recovery_generation');
+  const persisted=persistedPresent?fields.receipt_recovery_generation:retry;
+  if(!Number.isSafeInteger(retry)||retry<0||!Number.isSafeInteger(persisted)||
+      persisted<0)fail('functional-recovery-generation');
+  if(persistedPresent&&persisted<retry)fail('functional-recovery-generation');
+  return persisted;
+}
+function requiresFunctionalReceiptBinding(fields={},sliceId=null,
+  invalidationFloor=0,invalidationHistoryComplete=true){
+  if(!Number.isSafeInteger(invalidationFloor)||invalidationFloor<0)
+    fail('functional-recovery-generation');
+  if(typeof invalidationHistoryComplete!=='boolean')
+    fail('functional-recovery-history');
+  if(invalidationFloor>0&&!Object.hasOwn(fields||{},
+      'receipt_recovery_generation'))
+    fail('functional-recovery-generation');
+  const bindings=parseFunctionalReceiptBindings(
+    fields.functional_receipt_bindings_json);
+  if(sliceId!==null)return recoveryGenerationFromFields(fields)>0||
+    invalidationFloor>0||!invalidationHistoryComplete||
+    Object.hasOwn(bindings,sliceId);
+  return recoveryGenerationFromFields(fields)>0||
+    !invalidationHistoryComplete||Object.hasOwn(fields,
+      'functional_receipt_bindings_json');
+}
+function recoveryInvalidationFloor({projectCapability,sessionId,sliceId}={}){
+  return recoveryInvalidationState({projectCapability,sessionId,sliceId}).floor;
+}
+function recoveryInvalidationState({projectCapability,sessionId,sliceId}={}){
+  if(!SLICE.test(sliceId||''))fail('functional-recovery-history');
+  const journal=require('./operation-journal.js');
+  const rows=journal.listCompletedOperations({projectCapability,sessionId})
+    .filter((row)=>row.kind==='test-retry'||row.kind==='test-exhaust');
+  let floor=0;const identities=[];let hasRelevantRow=false;
+  let latestCompleteGeneration=-1;let lastRelevantComplete=true;
+  let previousGeneration=null;
+  for(const row of rows){
+    const result=row.result;
+    if(row.resultSha256!==journal.sha256(journal.canonicalJson(result)))
+      fail('functional-recovery-history');
+    const checkedGeneration=validateRecoveryGenerationSequence(result,
+      previousGeneration);
+    previousGeneration=checkedGeneration.previousGeneration;
+    const generation=checkedGeneration.generation;
+    const invalidated=Array.isArray(result?.invalidated_slices)?
+      result.invalidated_slices:result?.invalidatedSlices;
+    if(!Array.isArray(invalidated)){
+      const failed=Array.isArray(result?.failedSlices)?result.failedSlices:
+        result?.failed_slices;
+      if(!Array.isArray(failed)||failed.includes(sliceId)){
+        hasRelevantRow=true;lastRelevantComplete=false;
+      }
+      continue;
+    }
+    if(!invalidated.includes(sliceId))continue;
+    hasRelevantRow=true;
+    if(generation===null)fail('functional-recovery-history');
+    floor=Math.max(floor,generation);
+    if(!Array.isArray(result.invalidated_functional_receipts)){
+      lastRelevantComplete=false;continue;
+    }
+    for(const identity of result.invalidated_functional_receipts){
+      if(!exactKeys(identity,['slice_id','receipt_sha256',
+          'completion_operation_id'])||!SLICE.test(identity.slice_id||'')||
+          !(identity.receipt_sha256===null||DIGEST.test(identity.receipt_sha256||''))||
+          !(identity.completion_operation_id===null||
+            OPERATION.test(identity.completion_operation_id||''))||
+          (identity.receipt_sha256===null)!==(identity.completion_operation_id===null))
+        fail('functional-recovery-history');
+      if(identity.slice_id===sliceId&&identity.receipt_sha256!==null)
+        identities.push({receipt_sha256:identity.receipt_sha256,
+          completion_operation_id:identity.completion_operation_id});
+    }
+    latestCompleteGeneration=Math.max(latestCompleteGeneration,
+      generation);
+    lastRelevantComplete=true;
+  }
+  const historyComplete=!hasRelevantRow||(lastRelevantComplete&&
+    latestCompleteGeneration>=floor);
+  return{floor,identities,historyComplete};
+}
+function recoveryGenerationFloor({projectCapability,sessionId}={}){
+  const journal=require('./operation-journal.js');
+  const rows=journal.listCompletedOperations({projectCapability,sessionId})
+    .filter((row)=>row.kind==='test-retry'||row.kind==='test-exhaust');
+  let floor=0;let hasRows=false;let lastRowComplete=true;
+  let latestCompleteGeneration=-1;
+  let previousGeneration=null;
+  for(const row of rows){
+    hasRows=true;
+    const result=row.result;
+    if(row.resultSha256!==journal.sha256(journal.canonicalJson(result)))
+      fail('functional-recovery-history');
+    const checkedGeneration=validateRecoveryGenerationSequence(result,
+      previousGeneration);
+    previousGeneration=checkedGeneration.previousGeneration;
+    const generation=checkedGeneration.generation;
+    const invalidated=Array.isArray(result?.invalidated_slices)?
+      result.invalidated_slices:result?.invalidatedSlices;
+    if(generation===null){lastRowComplete=false;continue;}
+    floor=Math.max(floor,generation);
+    if(!Array.isArray(invalidated)||
+        !Array.isArray(result.invalidated_functional_receipts)){
+      lastRowComplete=false;continue;
+    }
+    for(const identity of result.invalidated_functional_receipts){
+      if(!exactKeys(identity,['slice_id','receipt_sha256',
+          'completion_operation_id'])||!SLICE.test(identity.slice_id||'')||
+          !(identity.receipt_sha256===null||DIGEST.test(identity.receipt_sha256||''))||
+          !(identity.completion_operation_id===null||
+            OPERATION.test(identity.completion_operation_id||''))||
+          (identity.receipt_sha256===null)!==(identity.completion_operation_id===null))
+        fail('functional-recovery-history');
+    }
+    latestCompleteGeneration=Math.max(latestCompleteGeneration,generation);
+    lastRowComplete=true;
+  }
+  const historyComplete=!hasRows||(lastRowComplete&&
+    latestCompleteGeneration>=floor);
+  return{floor,historyComplete,hasRows};
+}
+function parseFunctionalReceiptBindings(value){
+  if(value===undefined||value===null||value==='')return{};
+  let parsed=value;
+  if(typeof value==='string')try{parsed=JSON.parse(value);}catch{
+    fail('functional-receipt-bindings');}
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))
+    fail('functional-receipt-bindings');
+  const result={};
+  for(const [sliceId,binding] of Object.entries(parsed)){
+    if(!SLICE.test(sliceId)||!exactKeys(binding,['recovery_generation',
+        'receipt_sha256','completion_operation_id'])||
+        !Number.isSafeInteger(binding.recovery_generation)||
+        binding.recovery_generation<0||
+        !(binding.receipt_sha256===null||DIGEST.test(binding.receipt_sha256||''))||
+        !(binding.completion_operation_id===null||
+          OPERATION.test(binding.completion_operation_id||''))||
+        (binding.receipt_sha256===null)!==(binding.completion_operation_id===null))
+      fail('functional-receipt-bindings');
+    result[sliceId]=structuredClone(binding);
+  }
+  return result;
+}
+function serializeFunctionalReceiptBindings(value){
+  return canonicalJson(parseFunctionalReceiptBindings(value));
+}
+function setFunctionalReceiptBinding(value,sliceId,binding){
+  if(!SLICE.test(sliceId||''))fail('functional-receipt-bindings');
+  const result=parseFunctionalReceiptBindings(value);
+  const checked=parseFunctionalReceiptBindings({[sliceId]:binding})[sliceId];
+  result[sliceId]=checked;
+  return result;
+}
+function invalidateFunctionalReceiptBinding(value,sliceId,recoveryGeneration){
+  if(!Number.isSafeInteger(recoveryGeneration)||recoveryGeneration<0)
+    fail('functional-recovery-generation');
+  return setFunctionalReceiptBinding(value,sliceId,{recovery_generation:
+    recoveryGeneration,receipt_sha256:null,completion_operation_id:null});
+}
+function authenticateFunctionalReceiptBinding({fields,sliceId,receipt,
+  requireBinding=false,invalidated=false,minRecoveryGeneration=0,
+  invalidatedReceiptIdentities=[],invalidationHistoryComplete=true}={}){
+  if(!Number.isSafeInteger(minRecoveryGeneration)||minRecoveryGeneration<0)
+    fail('functional-recovery-generation');
+  if(minRecoveryGeneration>0&&!invalidationHistoryComplete)
+    fail('functional-recovery-history');
+  if(!Array.isArray(invalidatedReceiptIdentities))
+    fail('functional-recovery-history');
+  if(!invalidated&&invalidatedReceiptIdentities.some((identity)=>
+      identity?.receipt_sha256===receipt?.receipt_sha256&&
+      identity?.completion_operation_id===receipt?.completion_operation_id))
+    fail('functional-receipt-binding');
+  const binding=parseFunctionalReceiptBindings(fields?.functional_receipt_bindings_json)[sliceId];
+  if(!binding){if(requireBinding)fail('functional-receipt-binding');return true;}
+  const generation=recoveryGenerationFromFields(fields);
+  if(binding.recovery_generation<minRecoveryGeneration||
+      binding.recovery_generation>generation)
+    fail('functional-receipt-binding');
+  if(invalidated){
+    if(binding.recovery_generation!==generation||
+        binding.receipt_sha256!==null||binding.completion_operation_id!==null)
+      fail('functional-receipt-binding');
+  }else if(binding.receipt_sha256!==receipt?.receipt_sha256||
+      binding.completion_operation_id!==receipt?.completion_operation_id)
+    fail('functional-receipt-binding');
+  return true;
+}
+function receiptBindingFromReceipt(receipt,recoveryGeneration){
+  if(!Number.isSafeInteger(recoveryGeneration)||recoveryGeneration<0)
+    fail('functional-recovery-generation');
+  if(!DIGEST.test(receipt?.receipt_sha256||'')||
+      !OPERATION.test(receipt?.completion_operation_id||''))
+    fail('functional-receipt-binding');
+  return{recovery_generation:recoveryGeneration,
+    receipt_sha256:receipt.receipt_sha256,
+    completion_operation_id:receipt.completion_operation_id};
+}
 function validateVerificationResultRefV1(value){
   if(!exactKeys(value,['operation_id','result_path','result_sha256',
     'ledger_result_sha256'])||!OPERATION.test(value.operation_id||'')||
@@ -191,6 +398,42 @@ function readCanonical(file,code,max=16*1024*1024,allowNoLf=false){
     fail(code);
   return{value,bytes};
 }
+function validateFunctionalCompletionLedger(completed,{sessionId,sliceId,
+  receiptRelative,receipt,code='functional-recovery-parent'}={}){
+  const result=completed?.result;
+  if(completed?.stage!=='completed-ledger'||!exactKeys(result,
+      ['session_id','slice_id','receipt_path','receipt_sha256',
+        'post_state_sha256'])||result.session_id!==sessionId||
+      result.slice_id!==sliceId||result.receipt_path!==receiptRelative||
+      result.receipt_sha256!==receipt.receipt_sha256||
+      !DIGEST.test(result.post_state_sha256||'')||
+      completed.resultSha256!==sha256(canonicalJson(result)))
+    fail(code);
+  return result;
+}
+function reconstructInvalidatedFunctionalReceipt({legacy,sessionId,sliceId,
+  plan,verificationPlanSha256}={}){
+  if(!legacy||legacy.schema_version!==2||legacy.status!=='invalidated'||
+      !/^s-[0-9a-f]{8}$/.test(sessionId||'')||
+      legacy.slice_id!==sliceId||legacy.slice_kind!=='functional'||
+      legacy.plan_authority_sha256!==plan.plan_authority_sha256||
+      legacy.verification_plan_sha256!==verificationPlanSha256||
+      legacy.red_proof_ref!==`.deep-work/${sessionId}/red-proofs/${
+        legacy.red_proof_sha256}.json`)
+    fail('functional-recovery-receipt');
+  let receipt;try{const candidate=structuredClone(legacy);delete candidate.status;
+    receipt=validateFunctionalSliceReceiptV2(candidate);}catch{fail('functional-recovery-receipt');}
+  if(legacy.completion_operation_id!==receipt.completion_operation_id||
+      legacy.receipt_sha256!==receipt.receipt_sha256)
+    fail('functional-recovery-receipt');
+  return receipt;
+}
+function assertFunctionalRecoveryState({target,fields}={}){
+  if(target?.checked!==false||fields?.active_slice!==target?.id||
+      fields?.tdd_state!=='SENSOR_CLEAN')
+    fail('functional-recovery-plan-not-reset');
+  return true;
+}
 async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
   const transaction=require('./transaction-runtime.js');
   const root=stateCapability.projectRoot,sid=transaction.sessionIdFromState(stateCapability);
@@ -199,6 +442,7 @@ async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
   const proof=readCanonical(path.join(root,...expected.split('/')),
     'functional-red-proof',16*1024*1024,true).value;
   const project=transaction.projectCapabilityFor(stateCapability);
+  recoveryInvalidationState({projectCapability:project,sessionId:sid,sliceId});
   if(proof.transition_kind==='bootstrap-adoption'){
     const bootstrap=require('./bootstrap-runtime.js');
     const control=path.join(root,'.deep-work',sid,'bootstrap');
@@ -259,6 +503,21 @@ async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
     verificationReceipt,transitionReceipt,proofReceipt});
   return{proof,verificationReceipt,transitionReceipt,proofReceipt};
 }
+function buildFunctionalReceiptTargetLocks({root,targets,rank,
+  issueCapability}={}){
+  if(typeof root!=='string'||!root||!Array.isArray(targets)||!targets.length||
+      targets.some((target)=>typeof target!=='string'||!target)||
+      !Number.isInteger(rank)||typeof issueCapability!=='function')
+    fail('functional-completion-locks');
+  const requests=targets.map((target)=>({rank,
+    capability:issueCapability(root,path.join(root,'.claude',
+      `deep-work.target.${sha256(path.relative(root,target))}.lock`),
+    {allowMissingLeaf:true,role:'lock'})}));
+  if(requests.some((request)=>typeof request.capability?.path!=='string'||
+      !request.capability.path))fail('functional-completion-locks');
+  return requests.sort((a,b)=>Buffer.compare(Buffer.from(a.capability.path),
+    Buffer.from(b.capability.path)));
+}
 async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,plan,
   sliceId,greenVerification,refactorEvidence,seam,_locksHeld=false}={}){
   const platform=require('./platform.js');
@@ -274,11 +533,9 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     if(typeof workFields.work_dir!=='string')fail('functional-completion-state');
     const receiptPath=path.join(root,...workFields.work_dir.split('/'),'receipts',
       `${sliceId}.json`);
-    const targets=[planCapability.path,receiptPath].sort((a,b)=>
-      Buffer.compare(Buffer.from(a),Buffer.from(b))).map((target)=>({
-        rank:transaction.RANKS.target,capability:platform.issueProjectStateCapability(
-          root,path.join(root,'.claude',`deep-work.target.${sha256(
-            path.relative(root,target))}.lock`),{allowMissingLeaf:true,role:'lock'})}));
+    const targets=buildFunctionalReceiptTargetLocks({root,targets:
+      [planCapability.path,receiptPath],rank:transaction.RANKS.target,
+      issueCapability:platform.issueProjectStateCapability});
     return transaction.withRankedLocks([{rank:transaction.RANKS.session,
       capability:platform.issueProjectStateCapability(root,path.join(root,'.claude',
         `deep-work.${sid}.rank-operation.lock`),{allowMissingLeaf:true,role:'lock'})},
@@ -303,6 +560,9 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   if(!target||target.slice_kind!=='functional')fail('functional-completion-slice');
   const stateText=fs.readFileSync(stateCapability.path,'utf8');
   const fields=frontmatter.parseFrontmatter(stateText).fields;
+  const recoveryGeneration=recoveryGenerationFromFields(fields);
+  const binding=fields.functional_receipt_bindings_json===undefined?
+    {}:parseFunctionalReceiptBindings(fields.functional_receipt_bindings_json);
   if(fields.current_phase!=='implement'||
       !(fields.active_slice===sliceId||target.checked&&fields.active_slice===null)||
       !DIGEST.test(fields.verification_plan_sha256||''))
@@ -347,24 +607,29 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     green_verification:green.ref,refactor_evidence:refactor});
   const operationId=receipt.completion_operation_id;
   const project=transaction.projectCapabilityFor(stateCapability);
+  const invalidation=recoveryInvalidationState({projectCapability:project,
+    sessionId:sid,sliceId});
   const completed=await journal.resumeOperation({projectCapability:project,
     operationId,sessionId:sid,kind:'functional-slice-complete-v2'})
     .catch((error)=>{if(error.code==='operation-not-found')return null;throw error;});
   const receiptRelative=`.deep-work/${sid}/receipts/${sliceId}.json`;
   const receiptPath=path.join(root,...receiptRelative.split('/'));
   if(completed?.stage==='completed-ledger'){
-    const stored=validateFunctionalSliceReceiptV2(readCanonical(receiptPath,
-      'functional-receipt-adoption').value);
-    const result=completed.result;
-    if(canonicalJson(stored)!==canonicalJson(receipt)||
-        !exactKeys(result,['session_id','slice_id','receipt_path','receipt_sha256',
-          'post_state_sha256'])||
-        result.session_id!==sid||result.slice_id!==sliceId||
-        result.receipt_path!==receiptRelative||
-        result.receipt_sha256!==receipt.receipt_sha256||
-        !DIGEST.test(result.post_state_sha256||'')||
-        completed.resultSha256!==sha256(canonicalJson(result)))
+    const storedRaw=readCanonical(receiptPath,
+      'functional-receipt-adoption').value;
+    if(storedRaw.status==='invalidated')
+      fail('functional-recovery-fresh-evidence');
+    const stored=validateFunctionalSliceReceiptV2(storedRaw);
+    authenticateFunctionalReceiptBinding({fields,sliceId,receipt:stored,
+      requireBinding:requiresFunctionalReceiptBinding(fields,sliceId,
+        invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
+    if(canonicalJson(stored)!==canonicalJson(receipt))
       fail('functional-completion-ledger');
+    const result=validateFunctionalCompletionLedger(completed,{sessionId:sid,
+      sliceId,receiptRelative,receipt,code:'functional-completion-ledger'});
     return{...result,operation_id:operationId,operation_receipt:completed,
       adopted:true};
   }
@@ -387,8 +652,25 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
   const receiptBytes=Buffer.from(canonicalJson(receipt));
   fs.mkdirSync(path.dirname(receiptPath),{recursive:true});
   if(fs.existsSync(receiptPath)){
-    if(!fs.readFileSync(receiptPath).equals(receiptBytes))
-      fail('functional-receipt-adoption');
+    const existing=readCanonical(receiptPath,'functional-receipt-adoption');
+    if(!existing.bytes.equals(receiptBytes)){
+      if(existing.value.status!=='invalidated')fail('functional-receipt-adoption');
+      assertFunctionalRecoveryState({target,fields});
+      let invalidated;
+      try{invalidated=reconstructInvalidatedFunctionalReceipt({legacy:existing.value,
+        sessionId:sid,sliceId,plan:current,
+        verificationPlanSha256:fields.verification_plan_sha256});}
+      catch{fail('functional-receipt-adoption');}
+      if(invalidated.receipt_sha256===receipt.receipt_sha256||
+          invalidated.completion_operation_id===receipt.completion_operation_id)
+        fail('functional-recovery-fresh-evidence');
+      const capability=transaction.issueSessionFileCapability({
+        sessionCapability,candidate:receiptPath,allowedBasenames:[`${sliceId}.json`],
+        role:'functional-slice-receipt'});
+      seam?.('before-receipt-write',{operationId,receiptPath});
+      transaction.atomicWriteSessionFile(capability,receiptBytes);
+      seam?.('after-receipt-write-before-stage',{operationId,receiptPath});
+    }
   }else{
     const capability=transaction.issueSessionFileCapability({
       sessionCapability,candidate:receiptPath,allowedBasenames:[`${sliceId}.json`],
@@ -413,7 +695,11 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     active_slice:null,tdd_state:'PENDING',accepted_write_operation_id:null,
     accepted_write_receipt_sha256:null,accepted_write_class:null,
     functional_receipt_sha256:receipt.receipt_sha256,
-    functional_completion_operation_id:operationId});
+    functional_completion_operation_id:operationId,
+    functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+      ...binding,[sliceId]:receiptBindingFromReceipt(receipt,recoveryGeneration)}),
+    implement_completed_at:planRuntime.implementProgressComplete(nextPlan)?
+      currentFields.implement_completed_at||new Date().toISOString():undefined});
   if(afterState!==currentState){
     seam?.('before-state-write',{operationId});
     platform.atomicWriteFile(stateCapability,afterState);
@@ -433,5 +719,16 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
 module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   validateRefactorEvidenceV1,functionalCompletionOperationId,
   buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
+  validateFunctionalCompletionLedger,
+  reconstructInvalidatedFunctionalReceipt,
+  assertFunctionalRecoveryState,
   authenticateVerificationResultRefV1,authenticateSensorResultRefV1,
-  authenticateRedProof,publishFunctionalSliceReceiptV2,semanticDigest};
+  authenticateRedProof,buildFunctionalReceiptTargetLocks,
+  publishFunctionalSliceReceiptV2,semanticDigest,recoveryGenerationFromFields,
+  requiresFunctionalReceiptBinding,
+  recoveryInvalidationFloor,
+  recoveryInvalidationState,
+  recoveryGenerationFloor,
+  parseFunctionalReceiptBindings,serializeFunctionalReceiptBindings,
+  setFunctionalReceiptBinding,invalidateFunctionalReceiptBinding,
+  authenticateFunctionalReceiptBinding,receiptBindingFromReceipt};

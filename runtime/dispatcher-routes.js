@@ -58,7 +58,7 @@ function finishAdmission(stateCap,enforcementPoint){
   if(fields.verification_plan_json===undefined||fields.verification_plan_json===null||fields.verification_plan_json==='')
     fail('finish-verification-plan-required');const plan=storedObject(fields,'verification_plan_json');
   if(!verificationPolicy.validateVerificationPlan(plan).pass||plan.plan_sha256!==fields.verification_plan_sha256||
-      plan.plan_projection_sha256!==hash(planProjection)||plan.compatibility_mode!==compatibilityMode)
+      !planProjectionMatches(plan.plan_projection_sha256,planProjection)||plan.compatibility_mode!==compatibilityMode)
     fail('finish-verification-plan');const evidence=require('./evidence-runtime.js'),pointer=review.evidence;
   if(pointer?.verification_plan_sha256!==plan.plan_sha256)fail('finish-evidence-package');
   const pkg=evidence.loadCommittedPackage(root,pointer,plan);if(!pkg)fail('finish-evidence-package');
@@ -98,6 +98,16 @@ async function ownedInput(stateCap,file,expectedPurpose,consumerOperationId){con
 function safeRemoveTree(root,target){const resolved=path.resolve(target);if(!platform.isPathInside(root,resolved)||resolved===root)fail('remove-route');
   if(fs.existsSync(resolved)){const stat=fs.lstatSync(resolved);if(stat.isSymbolicLink())fail('remove-link');fs.rmSync(resolved,{recursive:true,force:false});}return{removed:resolved};}
 function hash(value){return crypto.createHash('sha256').update(Buffer.isBuffer(value)?value:journal.canonicalJson(value)).digest('hex');}
+// Slice completion persists `slices[*].checked` as progress. It is not part
+// of the immutable projection identity compiled before implementation starts.
+// Recompute the one producer-backed identity with every progress marker reset.
+function planProjectionHashCandidates(value){
+  const legacyFalse=structuredClone(value);
+  for(const sliceRow of legacyFalse?.slices||[])
+    if(sliceRow&&typeof sliceRow==='object')sliceRow.checked=false;
+  return new Set([hash(legacyFalse)]);
+}
+function planProjectionMatches(expected,value){return planProjectionHashCandidates(value).has(String(expected));}
 function storedObject(fields,key){const value=fields[key];if(value&&typeof value==='object'&&!Array.isArray(value))return structuredClone(value);
   try{const parsed=JSON.parse(value);if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))return parsed;}catch{}
   fail('state-object',key);}
@@ -120,7 +130,7 @@ function loadTestPassContext(stateCap,planProjection){const fields=stateFields(s
   let verificationPlan=null,evidencePackage=null,evidenceSummary=null;const artifactRoot=sessionCapability(stateCap).path;
   if(fields.verification_plan_json!==undefined&&fields.verification_plan_json!==null&&fields.verification_plan_json!==''){
     verificationPlan=storedObject(fields,'verification_plan_json');if(!policy.validateVerificationPlan(verificationPlan).pass||
-        verificationPlan.plan_sha256!==fields.verification_plan_sha256||verificationPlan.plan_projection_sha256!==hash(planProjection)||
+        verificationPlan.plan_sha256!==fields.verification_plan_sha256||!planProjectionMatches(verificationPlan.plan_projection_sha256,planProjection)||
         verificationPlan.compatibility_mode!==compatibilityMode)fail('test-verification-plan-state');
     const evidence=require('./evidence-runtime.js');evidencePackage=evidence.loadCommittedPackage(artifactRoot,review.evidence,verificationPlan);
     if(evidencePackage)evidenceSummary=evidence.evaluateEvidenceCompleteness(evidencePackage,verificationPlan,{artifactRoot});}

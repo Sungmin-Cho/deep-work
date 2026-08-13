@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const { transitionSliceTdd, advancePhase, enterSpecSubphase,approveSpecSubphase,approvePhase,
-  completeDebug,recordPhaseReview,PHASE_GRAPH } = require('./phase-runtime.js');
+  completeDebug,recordPhaseReview,PHASE_GRAPH,rerunPhase } = require('./phase-runtime.js');
 const {specContractDigest}=require('./contract-runtime.js');
 const platform=require('./platform.js');const transaction=require('./transaction-runtime.js');
 const {beginScopedWrite,acceptScopedWrite,completeSlice}=require('./slice-runtime.js');
@@ -16,6 +16,12 @@ const {parseFrontmatter}=require('./frontmatter.js');
 const artifact=require('./artifact-runtime.js');
 const phaseRuntime=require('./phase-runtime.js');
 const {canonicalJson,sha256}=require('./operation-journal.js');
+
+test('test rerun preserves the recovery generation before resetting retry count',()=>{
+  const next=rerunPhase({state:{current_phase:'test',test_retry_count:2},phase:'test'});
+  assert.equal(next.receipt_recovery_generation,2);
+  assert.equal(next.test_retry_count,0);assert.equal(next.test_passed,false);
+});
 
 test('phase graph is closed and skip edges are explicit', () => {
   assert.deepEqual(PHASE_GRAPH.brainstorm, ['research']);

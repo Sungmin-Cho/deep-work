@@ -15,6 +15,8 @@ plugin is and how to use it.
 
 ## Runtime surfaces
 
+This section is the authority for shipped runtime surfaces and the Node floor.
+
 Manifests `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` + `${CLAUDE_PLUGIN_ROOT}/.codex-plugin/plugin.json` · skills
 `skills/*/SKILL.md` with cross-skill guides under `skills/shared/references/` ·
 hooks `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` + `hooks/scripts/` · agents `agents/*.md`. Node ≥ 22
@@ -71,6 +73,8 @@ Two conditions, and **both** must hold:
    first, then check the result is under the root.
 
 If either fails, **abort and report — do not read it and do not run it.**
+
+Entry skills remain self-contained for state resolution, argument parsing, user choices, and output format. Shared procedures may be loaded only through an explicit, contained `Read` anchored at `${CLAUDE_PLUGIN_ROOT}`; sibling skill auto-loading is never required.
 
 A bare relative path resolves against the *target workspace*. A repository under
 analysis could then shadow a plugin contract with a same-named file and have its
@@ -148,6 +152,9 @@ each omission with the reason it was left out. The suite's strict-mode example
 pack covers more families at the hook level.
 
 ## Conventions
+
+This section is the authority for agent-only repository mechanics. Human
+contributors follow `CONTRIBUTING.md`, which links here for these mechanics.
 
 - **Never `git add -A`** — stage explicit paths so untracked local files cannot
   leak into a commit. One commit per task, HEREDOC message with the

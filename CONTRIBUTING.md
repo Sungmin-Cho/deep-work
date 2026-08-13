@@ -29,6 +29,9 @@ full suite, so it is kept on a separate script.
 
 ## Conventions
 
+`AGENTS.md` is the authority for agent-only mechanics. The human-facing rules
+below remain mandatory regardless of which agent or host performs the work.
+
 - **Documentation** — the README is evergreen; release notes live only in the
   CHANGELOG. A fuller maintainer rulebook exists at `docs/DOCS_RULE.md`, but it is
   **not shipped**: it is gitignored, so your clone does not have it and CI never
@@ -38,7 +41,8 @@ full suite, so it is kept on a separate script.
   entry under `[Unreleased]` in both `CHANGELOG.md` and `CHANGELOG.ko.md`.
 - **Version triple-sync** — `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`,
   and `package.json` versions must always match.
-- **Atomic commits** — one task per commit; never `git add -A`.
+- **Atomic commits** — one task per commit; never `git add -A`. Stage only the
+  explicit paths that belong to the task.
 
 ## Pull requests
 

@@ -34,7 +34,8 @@ const OPERATION_KINDS = new Set([
     'gate-fact-publish',
     'release-source-graph-publish',
     'release-gate-result', 'release-verification-complete',
-    'functional-slice-complete-v2', 'refactor-no-change-decision',
+    'functional-slice-complete-v2',
+    'refactor-no-change-decision',
 ]);
 
 const COMPLETED_LEDGER_LIMIT = 512;
@@ -137,7 +138,8 @@ const ORDERED_WORKFLOW_KINDS=new Set(['bootstrap-abort','bootstrap-failure-publi
   'gate-fact-publish',
   'release-source-graph-publish','release-gate-result',
   'release-verification-complete',
-  'functional-slice-complete-v2','refactor-no-change-decision']);
+  'functional-slice-complete-v2',
+  'refactor-no-change-decision']);
 const LOCK_OPTIONS = Object.freeze({timeoutMs:10_000, staleMs:30_000, heartbeatMs:1_000,
   processIdentity:crypto.createHash('sha256').update(`operation-journal:${process.pid}`).digest('hex').slice(0,32)});
 
@@ -319,7 +321,6 @@ async function completeOperation(handle, result, {retainJournal=false}={}) {
       kind:handle.kind, stage:'completed-ledger', result, resultSha256:sha256(resultCanonical),
       completedAt:new Date().toISOString()};
     ledger.receipts.push(receipt);
-    ledger.receipts.sort((a, b) => Buffer.compare(Buffer.from(a.operationId), Buffer.from(b.operationId)));
     atomicWriteFile(cap(handle.projectCapability, filePaths.ledger), canonicalJson(ledger));
     if(!retainJournal){const journalCap = cap(handle.projectCapability, filePaths.journal);
       revalidatePathCapability(journalCap, 'operation-journal-cleanup');
@@ -370,6 +371,17 @@ function lookupCompletedOperation({projectCapability,operationId,sessionId,kind}
   }
   return null;
 }
+function listCompletedOperations({projectCapability,sessionId,kind}={}){
+  if(!validSessionId(sessionId))fail('operation-session','invalid operation session');
+  if(kind!==undefined&&!OPERATION_KINDS.has(kind))fail('operation-kind',
+    `unsupported operation kind: ${kind}`);
+  const root=projectRootOf(projectCapability);
+  const file=path.join(root,'.claude',
+    `deep-work.${sessionId}.completed-operations.json`);
+  if(!fs.existsSync(file))return[];
+  return structuredClone(readLedger(file).receipts.filter((row)=>
+    row.sessionId===sessionId&&(kind===undefined||row.kind===kind)));
+}
 
 const EXTERNAL_EFFECT_KINDS=new Set(['remote-push','pull-request-create',
   'finish-publish-pr']);
@@ -405,6 +417,7 @@ module.exports = {
   completeOperation,
   resumeOperation,
   lookupCompletedOperation,
+  listCompletedOperations,
   inspectExternalEffectOperationIds,
   canonicalJson,
   sha256,

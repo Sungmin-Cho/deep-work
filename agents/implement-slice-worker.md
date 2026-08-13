@@ -75,6 +75,10 @@ metadata are emitted by the wrap helper. Do NOT hand-author the envelope —
 use the helper script so ULID, RFC 3339 timestamp, and SemVer producer_version
 are produced consistently.
 
+The sole writer is
+`${CLAUDE_PLUGIN_ROOT}/hooks/scripts/wrap-receipt-envelope.js`, matching the
+authority in `AGENTS.md` §Receipt envelope.
+
 ### Step 1 — write the payload JSON to a temp file
 
 Use your `Write` tool to emit the payload (legacy receipt body) to a temp
@@ -87,57 +91,15 @@ Write(
 )
 ```
 
-Required payload JSON structure (all fields mandatory except where noted):
-
-```json
-{
-  "schema_version": "1.0",
-  "slice_id": "SLICE-NNN",
-  "cluster_id": "<cluster id from prompt input — e.g. 'C1'. Used by parent's verify-receipt item 6 for per-cluster baseline chain validation in team parallel mode. Solo mode may omit (defaults to '_default').>",
-  "status": "complete",
-  "tdd": {
-    "state_transitions": ["PENDING", "RED_VERIFIED", "GREEN", "SENSOR_CLEAN"],
-    "red_verification_output": "<verbatim FAIL output from verification_cmd during RED phase — real assertion/error message, NOT 'ok' or 'pass'>"
-  },
-  "git_before_slice": "<hash captured at slice start>",
-  "git_after_slice": "<hash captured at slice end>",
-  "changes": {
-    "git_diff": "<output of: git diff --no-color --patch <git_before_slice>..<git_after_slice> — flags MUST match verify-receipt's normalization. Omitting flags risks false diff mismatch at the parent gate.>"
-  },
-  "sensor_results": {
-    "lint": "pass|fail|skipped",
-    "typecheck": "pass|fail|skipped",
-    "reviewCheck": "pass|fail|skipped"
-  },
-  "spec_compliance": {
-    "passed": true,
-    "verification_cmd": "<optional — the command used to verify>",
-    "expected_output": "<optional — the expected output>",
-    "verification_output": "<optional — actual output recorded at GREEN time. Parent compares to expected_output via item 8; NO re-execution.>"
-  },
-  "slice_review": {
-    "stage1": "pass|fail",
-    "stage2": "pass|fail"
-  },
-  "review": {
-    "findings_ref": "<optional — reviews/slice-SLICE-NNN-roundN-findings.json>",
-    "reviewers": [{
-      "role": "semantic|executability",
-      "channel": "subagent|codex-cli|gemini-cli|deep-review",
-      "status": "completed|failed|timeout|skipped",
-      "fallback_used": false,
-      "effort": "medium|high|xhigh|max",
-      "effort_applied": false
-    }],
-    "verdict": "PASS|BLOCK"
-  },
-  "harness_metadata": {
-    "model_id": "<your model>",
-    "rework_count": 0,
-    "tests_passed_first_try": true
-  }
-}
-```
+The full envelope schema is owned by `AGENTS.md` §Receipt envelope; do not copy
+or hand-author it here. The payload must retain these operational fields:
+`schema_version`, `slice_id`, optional `cluster_id`, `status`,
+`tdd.state_transitions`, the verbatim non-trivial
+`tdd.red_verification_output`, `git_before_slice`, `git_after_slice`,
+`changes.git_diff`, `sensor_results`, `spec_compliance`, `slice_review`, and
+`harness_metadata`. An executed unified review adds the optional `review` object
+with `findings_ref`, reviewer `role`/`channel`/`status`/`fallback_used`/`effort`/
+`effort_applied`, and final `verdict`; otherwise omit that object.
 
 `schema_version` MUST be the literal string `"1.0"` (not numeric `1.0`). The
 envelope validator rejects payload without `schema_version: "1.0"`.
