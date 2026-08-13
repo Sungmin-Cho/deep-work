@@ -294,8 +294,11 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
         }catch{status='unknown';unknown=true;}
       }else if(slice.slice_kind==='release-verification'&&
           (value.schema_version===1||value.schema_version==='1.0')){
-        try{
+        if(value.schema_version===1&&!canonicalBytes){status='unknown';unknown=true;}
+        else try{
           const releaseRuntime=require('./release-gate-runtime.js');
+          // Legacy string-schema receipts may be pretty-printed and are
+          // normalized only after their self-digest and producer checks.
           if(releaseRuntime.isInvalidatedReleaseReceipt(value)){
             status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
             rows.push({slice_id:slice.id,slice_kind:slice.slice_kind||'functional',

@@ -376,10 +376,20 @@ test('gate-fact-publish authenticates catalog inputs and adopts exact fact bytes
     const functionalRefsPath=path.join(root,'functional-refs.json');
     fs.writeFileSync(gateRefsPath,journal.canonicalJson(result.gate_result_refs));
     fs.writeFileSync(functionalRefsPath,'[]');
+    await assert.rejects(()=>gate.publishReleaseVerificationReceipt({
+      stateCapability,planCapability,plan,sliceId:'SLICE-001',
+      gateResults:result.gate_result_refs,functionalReceipts:[],
+      seam:(point)=>{
+        if(point==='after-release-plan-write-before-state')
+          throw new Error('simulated-release-completion-interruption');
+      }}),/simulated-release-completion-interruption/);
+    const interruptedPlan=JSON.parse(fs.readFileSync(planCapability.path,'utf8'));
+    assert.equal(interruptedPlan.slices[0].checked,true);
     const completed=await dispatch(['release','verification','complete','--state',
       statePath,'--plan',planCapability.path,'--slice','SLICE-001',
       '--gate-results-json',gateRefsPath,'--functional-receipts-json',
       functionalRefsPath],{cwd:root});
+    assert.equal(completed.adopted,true);
     assert.match(completed.receipt_sha256,/^[0-9a-f]{64}$/);
     const completedPlan=JSON.parse(fs.readFileSync(planCapability.path,'utf8'));
     assert.equal(completedPlan.slices[0].checked,true);

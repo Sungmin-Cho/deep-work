@@ -511,12 +511,21 @@ function buildReleaseVerificationCompletionPreconditions({sessionId,sliceId,curr
     plan_authority_sha256:current.plan_authority_sha256,
     verification_plan_sha256:fields.verification_plan_sha256,
     gate_results:gateResults,functional_receipts:functional};
-  const retryGeneration=fields.test_retry_count===undefined?0:
-    fields.test_retry_count;
+  const retryGeneration=fields.receipt_recovery_generation===undefined?
+    (fields.test_retry_count===undefined?0:fields.test_retry_count):
+    fields.receipt_recovery_generation;
   if(!Number.isSafeInteger(retryGeneration)||retryGeneration<0)
     fail('release-verification-state');
   if(retryGeneration>0)preconditions.retry_generation=retryGeneration;
   return preconditions;
+}
+function assertStoredReleaseVerificationReceipt(file,receipt,code='release-verification-recovery'){
+  if(!fs.existsSync(file))fail(code);
+  const raw=readReleaseReceipt(file,code).value;
+  if(raw.status==='invalidated')fail(code);
+  let stored;try{stored=normalizeReleaseVerificationReceipt(raw);}catch{fail(code);}
+  if(canonical(stored)!==canonical(receipt))fail(code);
+  return stored;
 }
 function producerBindsInputRef({producer,ref,planAuthoritySha256,
   verificationPlanSha256}={}){
@@ -1281,39 +1290,74 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     return{...existing.result,operation_id:id,
       operation_receipt:existing,adopted:true};
   }
-  if(slice.checked!==false)fail('release-verification-state');
+  const pending=existing?.status==='pending';
+  if(!pending&&slice.checked!==false)fail('release-verification-state');
   const operation=await journal.beginOperation({projectCapability:project,
     sessionId:sid,kind:'release-verification-complete',operationId:id,
     preconditions});
-  await journal.recordOperationStage(operation,'aggregate-authenticated',{owned:{
+  let operationJournal=await journal.recordOperationStage(operation,
+    'aggregate-authenticated',{owned:{
     gateCount:gateResults.length,functionalCount:functional.length}});
-  seam?.('before-release-receipt-write',{operationId:id,path:relative});
-  const replaced=await replaceInvalidatedReleaseReceipt({stateCapability,
-    current,fields,sliceId,relative,receipt});
-  if(!replaced)writeExclusive(path.join(stateCapability.projectRoot,
-    ...relative.split('/')),receipt,'release-verification-receipt');
-  await journal.recordOperationStage(operation,'receipt-published',{owned:{
-    receiptPath:relative,receiptSha256:receipt.receipt_sha256}});
+  let stages=new Set(operationJournal.stages.map((row)=>row.stage));
   const updated=structuredClone(current);
   updated.slices=updated.slices.map((row)=>row.id===sliceId?
     {...row,checked:true}:row);
   if(planRuntime.compileImmutablePlanAuthorityV2(updated).plan_authority_sha256!==
       current.plan_authority_sha256)fail('release-verification-plan');
-  transaction.atomicWriteSessionFile(planCapability,canonical(updated));
+  const receiptPath=path.join(stateCapability.projectRoot,...relative.split('/'));
+  if(!stages.has('receipt-published')){
+    let replaced=false;
+    if(fs.existsSync(receiptPath)){
+      const raw=readReleaseReceipt(receiptPath,
+        'release-verification-recovery').value;
+      if(raw.status==='invalidated')replaced=await replaceInvalidatedReleaseReceipt({
+        stateCapability,current,fields,sliceId,relative,receipt});
+      else assertStoredReleaseVerificationReceipt(receiptPath,receipt);
+    }
+    if(!replaced&&!fs.existsSync(receiptPath)){
+      seam?.('before-release-receipt-write',{operationId:id,path:relative});
+      writeExclusive(receiptPath,receipt,'release-verification-receipt');
+    }
+  }else assertStoredReleaseVerificationReceipt(receiptPath,receipt);
+  operationJournal=await journal.recordOperationStage(operation,
+    'receipt-published',{owned:{receiptPath:relative,
+      receiptSha256:receipt.receipt_sha256}});
+  stages=new Set(operationJournal.stages.map((row)=>row.stage));
+  const planBytes=Buffer.from(canonical(updated));
+  const currentPlanBytes=transaction.readSessionFile(planCapability);
+  if(stages.has('progress-committed')){
+    if(!currentPlanBytes.equals(planBytes))fail('release-verification-recovery');
+  }else if(!currentPlanBytes.equals(planBytes)){
+    seam?.('before-release-plan-write',{operationId:id});
+    transaction.atomicWriteSessionFile(planCapability,planBytes);
+    seam?.('after-release-plan-write-before-state',{operationId:id});
+  }
   const stateBefore=fs.readFileSync(stateCapability.path,'utf8');
   const stateAfter=frontmatter.updateFrontmatterText(stateBefore,{
     release_verification_receipt_sha256:receipt.receipt_sha256,
     release_verification_operation_id:id,test_passed:true});
-  platform.atomicWriteFile(stateCapability,stateAfter);
+  const currentStateFields=frontmatter.parseFrontmatter(stateBefore).fields;
+  const stateAlreadyCommitted=currentStateFields.release_verification_receipt_sha256===
+      receipt.receipt_sha256&&currentStateFields.release_verification_operation_id===id&&
+    currentStateFields.test_passed===true;
+  let finalStateBytes=Buffer.from(stateBefore);
+  if(stages.has('progress-committed')){
+    if(!stateAlreadyCommitted)fail('release-verification-recovery');
+  }else if(!stateAlreadyCommitted){
+    seam?.('before-release-state-write',{operationId:id});
+    platform.atomicWriteFile(stateCapability,stateAfter);
+    finalStateBytes=Buffer.from(stateAfter);
+    seam?.('after-release-state-write-before-stage',{operationId:id});
+  }
   await journal.recordOperationStage(operation,'progress-committed',{owned:{
-    planSha256:journal.sha256(canonical(updated)),
-    postStateSha256:journal.sha256(Buffer.from(stateAfter))}});
+    planSha256:journal.sha256(planBytes),
+    postStateSha256:journal.sha256(finalStateBytes)}});
   const result={slice_id:sliceId,receipt_path:relative,
     receipt_sha256:receipt.receipt_sha256,
-    post_state_sha256:journal.sha256(Buffer.from(stateAfter))};
+    post_state_sha256:journal.sha256(finalStateBytes)};
   const operationReceipt=await journal.completeOperation(operation,result);
   return{...result,operation_id:id,operation_receipt:operationReceipt,
-    adopted:false};
+    adopted:pending};
 }
 
 module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,

@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
-const { recordTestPass, recordTestRetry, beginMutationRound, recordMutationResult } =
+const { recordTestPass, recordTestRetry, recordTestExhaustion, beginMutationRound, recordMutationResult } =
   require('./test-runtime.js');
 const platform=require('./platform.js');const transaction=require('./transaction-runtime.js');
 const {parseFrontmatter}=require('./frontmatter.js');
@@ -31,6 +31,10 @@ test('retry invalidates only failed slices and mutation round is separate', () =
   assert.equal(result.plan.slices[0].checked, true);
   assert.equal(result.plan.slices[1].checked, false);
   assert.equal(result.receipts['SLICE-002'].status, 'invalidated');
+  assert.equal(result.state.receipt_recovery_generation,1);
+  const exhausted=recordTestExhaustion({state:{current_phase:'test',test_retry_count:2,
+    max_test_retries:2},plan,receipts,failedSlices:['SLICE-001']});
+  assert.equal(exhausted.state.receipt_recovery_generation,1);
   assert.equal(beginMutationRound({state:{current_phase:'test'}, round:1,
     survived:{mutants:[1]}}).current_phase, 'implement');
   assert.equal(recordMutationResult({state:{}, result:{status:'not-applicable'}})
@@ -53,10 +57,11 @@ test('test retry adopts every partial plan receipt and state write',async()=>{
   for(const target of ['after-plan-write-before-stage','after-receipt-write-before-stage','after-state-write-before-stage'])await assert.rejects(
     ()=>recordTestRetry({...args(),seam:(name)=>{if(name===target)throw new Error(target);}}),new RegExp(target));
   const result=await recordTestRetry(args());assert.equal(result.state.current_phase,'implement');assert.equal(result.state.test_retry_count,1);
+  assert.equal(result.state.receipt_recovery_generation,1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(work,'plan.json'),'utf8')).slices[1].checked,false);
   assert.equal(JSON.parse(fs.readFileSync(path.join(receipts,'SLICE-002.json'),'utf8')).status,'invalidated');
   const fields=parseFrontmatter(fs.readFileSync(statePath,'utf8')).fields;assert.equal(fields.current_phase,'implement');
-  assert.equal(fields.test_retry_count,1);
+  assert.equal(fields.test_retry_count,1);assert.equal(fields.receipt_recovery_generation,1);
 });
 
 test('test retry uses bounded lock basenames for deep session work paths',async()=>{
