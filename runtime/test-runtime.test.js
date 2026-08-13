@@ -78,6 +78,40 @@ test('functional retry invalidates the dependent release receipt and progress',(
         completion_operation_id:null}});
 });
 
+test('retry seeds unaffected completed functional receipts before invalidating the failed slice',()=>{
+  const plan={slices:[{id:'SLICE-001',slice_kind:'functional',checked:true},
+    {id:'SLICE-002',slice_kind:'functional',checked:true}]};
+  const receipts={
+    'SLICE-001':{status:'complete',receipt_sha256:'a'.repeat(64),
+      completion_operation_id:'op-'+'b'.repeat(64)},
+    'SLICE-002':{status:'complete',receipt_sha256:'c'.repeat(64),
+      completion_operation_id:'op-'+'d'.repeat(64)}};
+  const result=recordTestRetry({state:{current_phase:'test',test_retry_count:0,
+    max_test_retries:2},plan,receipts,failedSlices:['SLICE-002']});
+  assert.deepEqual(functionalReceipt.parseFunctionalReceiptBindings(
+    result.state.functional_receipt_bindings_json),{
+      'SLICE-001':{recovery_generation:0,receipt_sha256:'a'.repeat(64),
+        completion_operation_id:'op-'+'b'.repeat(64)},
+      'SLICE-002':{recovery_generation:1,receipt_sha256:null,
+        completion_operation_id:null}});
+});
+
+test('retry invalidated receipt identity is an atomic digest-operation pair',()=>{
+  const result=recordTestRetry({
+    state:{current_phase:'test',test_retry_count:0,max_test_retries:2},
+    plan:{slices:[{id:'SLICE-001',slice_kind:'functional',checked:true}]},
+    receipts:{'SLICE-001':{status:'complete',receipt_sha256:'a'.repeat(64),
+      completion_operation_id:'op-malformed'}},failedSlices:['SLICE-001']});
+  assert.deepEqual(result.invalidatedFunctionalReceipts,[{slice_id:'SLICE-001',
+    receipt_sha256:null,completion_operation_id:null}]);
+});
+
+test('persisted recovery generation below retry count is rejected',()=>{
+  assert.throws(()=>functionalReceipt.recoveryGenerationFromFields({
+    test_retry_count:3,receipt_recovery_generation:1}),
+  /functional-recovery-generation/);
+});
+
 test('journaled functional retry invalidates dependent release stores',async()=>{
   const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
     'dw-test-dependent-release-')));fs.mkdirSync(path.join(root,'.git'));

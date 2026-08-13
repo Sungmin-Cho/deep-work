@@ -251,15 +251,20 @@ function authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
   if(!Array.isArray(refs)||canonicalJson(refs.map((row)=>row?.slice_id))!==
       canonicalJson(expected))fail('governed-release-functional');
   const runtime=require('./functional-receipt-runtime.js');
-  const requireBinding=runtime.requiresFunctionalReceiptBinding(fields);
   for(const ref of refs){
     const slice=plan.slices.find((row)=>row.id===ref.slice_id);
     const relative=`.deep-work/${sessionId}/receipts/${ref.slice_id}.json`;
     const file=path.join(workDir,'receipts',`${ref.slice_id}.json`);
     const receipt=runtime.validateFunctionalSliceReceiptV2(
       readBoundedCanonical(file,'governed-release-functional',1_048_576));
+    const invalidation=runtime.recoveryInvalidationState({
+      projectCapability:project,sessionId,sliceId:ref.slice_id});
     runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
-      receipt,requireBinding});
+      receipt,requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+        ref.slice_id,invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
     const producer=journal.lookupCompletedOperation({projectCapability:project,
       operationId:ref.completion_operation_id,sessionId,
       kind:'functional-slice-complete-v2'});
@@ -297,21 +302,33 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
       if(!value){status='unknown';unknown=true;}
       else if(slice.slice_kind==='functional'&&value.status==='invalidated'){
         try{const runtime=require('./functional-receipt-runtime.js');
+          const invalidation=runtime.recoveryInvalidationState({
+            projectCapability:project,sessionId,sliceId:slice.id});
           runtime.reconstructInvalidatedFunctionalReceipt({legacy:value,sessionId,
             sliceId:slice.id,plan,verificationPlanSha256:
-              fields.verification_plan_sha256});
+            fields.verification_plan_sha256});
           runtime.authenticateFunctionalReceiptBinding({fields,sliceId:slice.id,
             invalidated:true,
-            requireBinding:runtime.requiresFunctionalReceiptBinding(fields)});
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+              slice.id,invalidation.floor,invalidation.historyComplete),
+            minRecoveryGeneration:invalidation.floor,
+            invalidatedReceiptIdentities:invalidation.identities,
+            invalidationHistoryComplete:invalidation.historyComplete});
           status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
         }catch{status='unknown';unknown=true;}
       }else if(value.schema_version===2){
         if(!canonicalBytes){status='unknown';unknown=true;}else try{
           const runtime=require('./functional-receipt-runtime.js');
           const checked=runtime.validateFunctionalSliceReceiptV2(value);
+          const invalidation=runtime.recoveryInvalidationState({
+            projectCapability:project,sessionId,sliceId:slice.id});
           runtime.authenticateFunctionalReceiptBinding({fields,
             sliceId:slice.id,receipt:checked,
-            requireBinding:runtime.requiresFunctionalReceiptBinding(fields)});
+            requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+              slice.id,invalidation.floor,invalidation.historyComplete),
+            minRecoveryGeneration:invalidation.floor,
+            invalidatedReceiptIdentities:invalidation.identities,
+            invalidationHistoryComplete:invalidation.historyComplete});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -344,6 +361,14 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
           // Legacy string-schema receipts may be pretty-printed and are
           // normalized only after their self-digest and producer checks.
           if(releaseRuntime.isInvalidatedReleaseReceipt(value)){
+            const reconstructed=releaseRuntime
+              .reconstructInvalidatedReleaseReceipt(value);
+            if(reconstructed.slice_id!==slice.id||
+                reconstructed.plan_authority_sha256!==
+                  plan.plan_authority_sha256||
+                reconstructed.verification_plan_sha256!==
+                  fields.verification_plan_sha256)
+              fail('governed-release-authority');
             status='invalidated';receiptSha256=value.receipt_sha256;incomplete=true;
             rows.push({slice_id:slice.id,slice_kind:slice.slice_kind||'functional',
               status,receipt_sha256:receiptSha256});continue;
@@ -351,6 +376,11 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
           const checked=releaseRuntime.normalizeReleaseVerificationReceipt(value);
           authenticateEmbeddedFunctionalReceipts({checked,plan,workDir,
             project,sessionId,fields});
+          const expectedOperationId=releaseRuntime.releaseVerificationOperationId({
+            sessionId,sliceId:slice.id,current:plan,fields,
+            gateResults:checked.gate_results,
+            functional:checked.functional_receipts,
+            projectCapability:project});
           const relative=path.relative(stateCapability.projectRoot,file)
             .split(path.sep).join('/');
           const producer=journal.lookupCompletedOperation({
@@ -359,6 +389,7 @@ function receiptProjection(workDir,plan,replanActive,stateCapability,fields){
             kind:'release-verification-complete'});
           const result=producer?.result;
           if(checked.slice_id!==slice.id||slice.checked!==true||
+              checked.completion_operation_id!==expectedOperationId||
               checked.plan_authority_sha256!==plan.plan_authority_sha256||
               checked.verification_plan_sha256!==
                 fields.verification_plan_sha256||

@@ -78,6 +78,10 @@ test('release integrity treats v7 surfaces as active after the v7 migration',()=
     activeVersion:'7.1.4',versions}),[]);
   assert.deepEqual(gate.legacyV7SurfaceViolations({
     activeVersion:'6.14.0',versions}),['.claude-plugin/plugin.json']);
+  assert.throws(()=>gate.legacyV7SurfaceViolations({activeVersion:'not-semver',
+    versions}),/release-integrity-manifest/);
+  assert.throws(()=>gate.legacyV7SurfaceViolations({activeVersion:'6.14.0',
+    versions:null}),/release-integrity-manifest/);
 });
 
 test('CheckerInputCatalogV1 rejects wrong roles, duplicates, and caller ordering',()=>{
@@ -244,7 +248,7 @@ test('release completion identity advances after an authenticated test retry',()
     ...common,fields:{...common.fields,test_retry_count:1}});
   const floor=gate.buildReleaseVerificationCompletionPreconditions({
     ...common,fields:{...common.fields,test_retry_count:3,
-      receipt_recovery_generation:1}});
+      receipt_recovery_generation:3}});
   assert.equal(Object.hasOwn(first,'retry_generation'),false);
   assert.equal(retried.retry_generation,1);
   assert.equal(floor.retry_generation,3);
@@ -252,6 +256,44 @@ test('release completion identity advances after an authenticated test retry',()
     gate.semanticDigest('release-verification-complete-v1',retried));
   assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({
     ...common,fields:{...common.fields,test_retry_count:'1'}}),
+  /release-verification-state/);
+  assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({
+    ...common,fields:{...common.fields,test_retry_count:3,
+      receipt_recovery_generation:1}}),/release-verification-state/);
+});
+
+test('release completion rejects a rolled-back generation from release-only retry history',t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-release-recovery-floor-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const result={status:'completed',failedSlices:['SLICE-001'],
+    invalidatedSlices:['SLICE-001'],invalidated_slices:['SLICE-001'],
+    recovery_generation:1,invalidated_functional_receipts:[]};
+  const row={version:1,operationId:`op-${'8'.repeat(64)}`,sessionId,
+    kind:'test-retry',stage:'completed-ledger',result,resultSha256:journal.sha256(
+      journal.canonicalJson(result)),completedAt:'2026-08-13T00:00:00.000Z'};
+  fs.writeFileSync(path.join(root,'.claude',
+    `deep-work.${sessionId}.completed-operations.json`),journal.canonicalJson({
+      version:1,receipts:[row]}));
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  const common={sessionId,sliceId:'SLICE-001',
+    current:{plan_authority_sha256:'1'.repeat(64)},
+    fields:{verification_plan_sha256:'2'.repeat(64),test_retry_count:0},
+    gateResults:[{gate_id:'GATE-full-relevant-suite'}],functional:[],
+    projectCapability};
+  assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions(common),
+    /release-verification-state/);
+  assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({...common,
+    fields:{...common.fields,test_retry_count:1}}),
+  /release-verification-state/);
+  const guarded=gate.buildReleaseVerificationCompletionPreconditions({...common,
+    fields:{...common.fields,receipt_recovery_generation:1}});
+  assert.equal(guarded.retry_generation,1);
+  assert.throws(()=>gate.buildReleaseVerificationCompletionPreconditions({...common,
+    fields:{...common.fields,receipt_recovery_generation:0}}),
   /release-verification-state/);
 });
 

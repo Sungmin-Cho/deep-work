@@ -5056,8 +5056,7 @@ test('process supervision removes a grandchild after normal completion and timeo
       {cwdCapability:project, timeoutMs, maxOutputBytes:128_000});
       assert.equal(fs.existsSync(marker), true, mode);
       const pid = Number(fs.readFileSync(marker, 'utf8'));
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      assert.throws(() => process.kill(pid, 0), {code:'ESRCH'});
+      assert.deepEqual(await waitForProcessesToExit([pid]), []);
       assert.equal(mode === 'normal' ? result.ok : result.timedOut, true, mode);
     }
   } finally { remove(root); }
@@ -5073,8 +5072,7 @@ test('output overflow removes the process tree and termination failure is fail-c
     {cwdCapability:project, timeoutMs:2_000, maxOutputBytes:1_024});
     assert.equal(result.outputOverflow, true);
     const pid = Number(fs.readFileSync(marker, 'utf8'));
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.throws(() => process.kill(pid, 0), {code:'ESRCH'});
+    assert.deepEqual(await waitForProcessesToExit([pid]), []);
 
     let failedTermination;
     const failureMarker = path.join(root, '.claude', 'failure.pid');

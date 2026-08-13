@@ -2,12 +2,18 @@
 
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const platform=require('./platform.js');
+const journal=require('./operation-journal.js');
 const {buildFunctionalSliceReceiptV2,validateFunctionalSliceReceiptV2,
   validateRefactorEvidenceV1,semanticDigest,
   buildFunctionalReceiptTargetLocks,reconstructInvalidatedFunctionalReceipt,
   validateFunctionalCompletionLedger,assertFunctionalRecoveryState,
   serializeFunctionalReceiptBindings,authenticateFunctionalReceiptBinding,
-  requiresFunctionalReceiptBinding}=
+  requiresFunctionalReceiptBinding,recoveryInvalidationState,
+  recoveryGenerationFloor}=
   require('./functional-receipt-runtime.js');
 
 const op=(char)=>`op-${char.repeat(64)}`;
@@ -185,4 +191,164 @@ test('functional receipt binding rejects restored evidence after retry invalidat
         completion_operation_id:'op-'+'0'.repeat(64)}})},
     sliceId:'SLICE-001',receipt:current,requireBinding:true}),
   /functional-receipt-binding/);
+});
+
+test('completed retry history establishes an invalidation floor for old bindings',t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-functional-recovery-history-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const result={status:'completed',failedSlices:['SLICE-001'],
+    invalidatedSlices:['SLICE-001'],invalidated_slices:['SLICE-001'],
+    recovery_generation:1,invalidated_functional_receipts:[{slice_id:'SLICE-001',
+      receipt_sha256:'a'.repeat(64),completion_operation_id:op('b')}]};
+  const row={version:1,operationId:op('8'),sessionId,kind:'test-retry',
+    stage:'completed-ledger',result,resultSha256:journal.sha256(
+      journal.canonicalJson(result)),completedAt:'2026-08-13T00:00:00.000Z'};
+  fs.writeFileSync(path.join(root,'.claude',
+    `deep-work.${sessionId}.completed-operations.json`),journal.canonicalJson({
+      version:1,receipts:[row]}));
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  assert.equal(require('./functional-receipt-runtime.js').recoveryInvalidationFloor({
+    projectCapability,sessionId,sliceId:'SLICE-001'}),1);
+  assert.throws(()=>authenticateFunctionalReceiptBinding({
+    fields:{test_retry_count:1,receipt_recovery_generation:1,
+      functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+        'SLICE-001':{recovery_generation:0,receipt_sha256:'a'.repeat(64),
+          completion_operation_id:op('b')}})},sliceId:'SLICE-001',
+    receipt:{receipt_sha256:'a'.repeat(64),completion_operation_id:op('b')},
+    requireBinding:true,minRecoveryGeneration:1}),/functional-receipt-binding/);
+  assert.throws(()=>authenticateFunctionalReceiptBinding({
+    fields:{test_retry_count:1,receipt_recovery_generation:1},sliceId:'SLICE-001',
+    receipt:{receipt_sha256:'a'.repeat(64),completion_operation_id:op('b')},
+    requireBinding:false,minRecoveryGeneration:1,
+    invalidatedReceiptIdentities:[{receipt_sha256:'a'.repeat(64),
+      completion_operation_id:op('b')}]}),/functional-receipt-binding/);
+});
+
+test('legacy retry history remains binding-required after the retry counter resets',t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-functional-legacy-recovery-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const result={status:'completed',failedSlices:['SLICE-001']};
+  const row={version:1,operationId:op('9'),sessionId,kind:'test-retry',
+    stage:'completed-ledger',result,resultSha256:journal.sha256(
+      journal.canonicalJson(result)),completedAt:'2026-08-13T00:00:00.000Z'};
+  fs.writeFileSync(path.join(root,'.claude',
+    `deep-work.${sessionId}.completed-operations.json`),journal.canonicalJson({
+      version:1,receipts:[row]}));
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  const history=recoveryInvalidationState({projectCapability,sessionId,
+    sliceId:'SLICE-001'});
+  assert.equal(history.floor,0);assert.equal(history.historyComplete,false);
+  const fields={test_retry_count:0};
+  assert.equal(requiresFunctionalReceiptBinding(fields,'SLICE-001',
+    history.floor,history.historyComplete),true);
+  assert.throws(()=>authenticateFunctionalReceiptBinding({fields,
+    sliceId:'SLICE-001',receipt,requireBinding:requiresFunctionalReceiptBinding(
+      fields,'SLICE-001',history.floor,history.historyComplete),
+    invalidationHistoryComplete:history.historyComplete}),
+  /functional-receipt-binding/);
+});
+
+test('a complete current retry row seals an earlier legacy history gap for its generation',t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-functional-mixed-recovery-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const legacyResult={status:'completed',failedSlices:['SLICE-001']};
+  const currentResult={status:'completed',failedSlices:['SLICE-001'],
+    invalidatedSlices:['SLICE-001'],invalidated_slices:['SLICE-001'],
+    recovery_generation:2,invalidated_functional_receipts:[{slice_id:'SLICE-001',
+      receipt_sha256:'a'.repeat(64),completion_operation_id:op('b')}]};
+  const row=(operationId,result)=>({version:1,operationId,sessionId,
+    kind:'test-retry',stage:'completed-ledger',result,resultSha256:journal.sha256(
+      journal.canonicalJson(result)),completedAt:'2026-08-13T00:00:00.000Z'});
+  fs.writeFileSync(path.join(root,'.claude',
+    `deep-work.${sessionId}.completed-operations.json`),journal.canonicalJson({
+      version:1,receipts:[row(op('8'),legacyResult),row(op('9'),currentResult)]}));
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  const history=recoveryInvalidationState({projectCapability,sessionId,
+    sliceId:'SLICE-001'});
+  assert.equal(history.floor,2);assert.equal(history.historyComplete,true);
+  const currentReceipt={receipt_sha256:'c'.repeat(64),
+    completion_operation_id:op('d')};
+  assert.doesNotThrow(()=>authenticateFunctionalReceiptBinding({
+    fields:{test_retry_count:2,receipt_recovery_generation:2,
+      functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+        'SLICE-001':{recovery_generation:2,
+          receipt_sha256:currentReceipt.receipt_sha256,
+          completion_operation_id:currentReceipt.completion_operation_id}})},
+    sliceId:'SLICE-001',receipt:currentReceipt,requireBinding:true,
+    minRecoveryGeneration:history.floor,
+    invalidatedReceiptIdentities:history.identities,
+    invalidationHistoryComplete:history.historyComplete}));
+  assert.throws(()=>authenticateFunctionalReceiptBinding({
+    fields:{test_retry_count:2,receipt_recovery_generation:2,
+      functional_receipt_bindings_json:serializeFunctionalReceiptBindings({
+        'SLICE-001':{recovery_generation:2,
+          receipt_sha256:currentReceipt.receipt_sha256,
+          completion_operation_id:currentReceipt.completion_operation_id}})},
+    sliceId:'SLICE-001',receipt:{receipt_sha256:'a'.repeat(64),
+      completion_operation_id:op('b')},requireBinding:true,
+    minRecoveryGeneration:history.floor,
+    invalidatedReceiptIdentities:history.identities,
+    invalidationHistoryComplete:history.historyComplete}),
+  /functional-receipt-binding/);
+});
+
+test('a later legacy row reopens the recovery history boundary across retry kinds',async t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-functional-recovery-order-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const completeResult={status:'completed',failedSlices:['SLICE-001'],
+    invalidated_slices:['SLICE-001'],recovery_generation:2,
+    invalidated_functional_receipts:[]};
+  const legacyResult={status:'completed',failedSlices:['SLICE-001']};
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  const complete=(operationId,kind,result)=>journal.beginOperation({projectCapability,
+    sessionId,kind,operationId,preconditions:{}}).then((operation)=>
+    journal.completeOperation(operation,result));
+  // The current-format exhaust row completes first. The later legacy retry row
+  // deliberately has the lower lexical operation ID so operation-ID sorting
+  // would incorrectly make the history look sealed.
+  await complete(op('9'),'test-exhaust',completeResult);
+  await complete(op('1'),'test-retry',legacyResult);
+  assert.equal(recoveryInvalidationState({projectCapability,sessionId,
+    sliceId:'SLICE-001'}).historyComplete,false);
+  assert.equal(recoveryGenerationFloor({projectCapability,sessionId}).floor,2);
+  assert.equal(recoveryGenerationFloor({projectCapability,sessionId})
+    .historyComplete,false);
+});
+
+test('recovery history rejects a later lower generation across retry kinds',async t=>{
+  const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),
+    'dw-functional-generation-rollback-')));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.mkdirSync(path.join(root,'.git'));fs.mkdirSync(path.join(root,'.claude'));
+  const sessionId='s-aaaaaaaa';
+  const result=(generation)=>({status:'completed',failedSlices:['SLICE-001'],
+    invalidated_slices:['SLICE-001'],recovery_generation:generation,
+    invalidated_functional_receipts:[]});
+  const projectCapability=platform.issueProjectStateCapability(root,root,
+    {role:'project-root'});
+  const complete=(operationId,kind,value)=>journal.beginOperation({projectCapability,
+    sessionId,kind,operationId,preconditions:{}}).then((operation)=>
+    journal.completeOperation(operation,value));
+  await complete(op('9'),'test-retry',result(2));
+  await complete(op('1'),'test-exhaust',result(1));
+  assert.throws(()=>recoveryInvalidationState({projectCapability,sessionId,
+    sliceId:'SLICE-001'}),/functional-recovery-history/);
+  assert.throws(()=>recoveryGenerationFloor({projectCapability,sessionId}),
+    /functional-recovery-history/);
 });

@@ -817,7 +817,8 @@ test('fresh pure-LOW v6.13 production flow compiles minimal authority and reache
     current_phase:'research',created_by_version:'6.13.0',spec_policy_required:null,risk_profile_json:canonicalJson(riskProfile),
     risk_profile_sha256:riskProfileSha256,methodology_policy_json:canonicalJson({risk_class:'low',profile:'lean',
       verification_policy:{recommended:'최소 검증 (기록 전용)'}}),slice_risk_shadow_json:canonicalJson({'SLICE-001':{class:'low',
-      score:2,triggers:['low-flow']}}),review_execution_json:'{}',receipt_invalidations_json:'[]'}));
+      score:2,triggers:['low-flow']}}),review_execution_json:'{}',receipt_invalidations_json:'[]',
+    active_slice:'SLICE-001',tdd_state:'SENSOR_CLEAN'}));
   writeJson(path.join(root,'.claude','deep-work-sessions.json'),{version:1,shared_files:[],sessions:{[session]:{pid:process.pid,
     task_description:'LOW v6.13 full flow',work_dir:`.deep-work/${session}`,current_phase:'research',file_ownership:[],
     last_activity:ROUTE_TIMESTAMP}}});fs.writeFileSync(path.join(root,'.claude','deep-work-current-session'),`${session}\n`);
@@ -829,20 +830,29 @@ test('fresh pure-LOW v6.13 production flow compiles minimal authority and reache
   const verificationPlan=JSON.parse(fields.verification_plan_json),plan=JSON.parse(fs.readFileSync(path.join(work,'plan.json'),'utf8'));
   assert.equal(verificationPlan.risk_class,'low');assert.equal(verificationPlan.profile,'lean');
   await dispatch(['phase','advance','--state',state,'--from','plan','--to','implement','--at',ROUTE_TIMESTAMP],{cwd:root});
+  const stateCap=platform.issueProjectStateCapability(root,state,{role:'session-state'}),workCap=
+    platform.issueProjectStateCapability(root,work,{role:'session-work-dir',sessionStateCapability:stateCap});
+  const receiptTemp=await artifactRuntime.createOwnedTemp({sessionCapability:workCap,
+    purpose:'receipt-payload'});
+  await artifactRuntime.writeOwnedTemp({sessionCapability:workCap,
+    operationId:receiptTemp.operationId,purpose:'receipt-payload'},
+    Buffer.from('{"slice_id":"SLICE-001","status":"complete"}\n'));
+  await dispatch(['implement','slice','complete','--state',state,'--plan',
+    path.join(work,'plan.json'),'--receipts-dir',path.join(work,'receipts'),
+    '--slice','SLICE-001','--receipt-payload',receiptTemp.path],{cwd:root});
   await dispatch(['phase','advance','--state',state,'--from','implement','--to','test','--at',ROUTE_TIMESTAMP],{cwd:root});
   const published=await publishLowFlowEvidence({root,state,work,plan,verificationPlan,specContract:contract}),gateResults={complete:true,
     failedSlices:[],verification_plan_sha256:verificationPlan.plan_sha256,package_sha256:published.package.package_sha256,
     gates:requiredGateIds(verificationPlan,{at:'test'}).map((id)=>({id,status:'pass',evidence_ids:published.package.records
       .filter((row)=>row.gate_id===id&&row.status==='pass').map((row)=>row.evidence_id)}))};
-  const completedProjection=JSON.parse(fs.readFileSync(path.join(work,'plan.json'),'utf8'));
-  completedProjection.slices[0].checked=true;
-  fs.writeFileSync(path.join(work,'plan.json'),canonicalJson(completedProjection));
   const gatePath=writeJson(path.join(work,'gate-results.json'),gateResults);await dispatch(['test','pass','--state',state,'--plan',
     path.join(work,'plan.json'),'--gate-results-json',gatePath,'--at',ROUTE_TIMESTAMP],{cwd:root});
   fields=parseFrontmatter(fs.readFileSync(state,'utf8')).fields;assert.equal(fields.test_passed,true);
-  const stateCap=platform.issueProjectStateCapability(root,state,{role:'session-state'}),workCap=platform.issueProjectStateCapability(root,work,
-    {role:'session-work-dir',sessionStateCapability:stateCap}),temp=await artifactRuntime.createOwnedTemp({sessionCapability:workCap,
-      purpose:'receipt-payload'});await artifactRuntime.writeOwnedTemp({sessionCapability:workCap,operationId:temp.operationId,
+  const finishedStateCap=platform.issueProjectStateCapability(root,state,{role:'session-state'}),
+    finishedWorkCap=platform.issueProjectStateCapability(root,work,{role:'session-work-dir',
+      sessionStateCapability:finishedStateCap});
+  const temp=await artifactRuntime.createOwnedTemp({sessionCapability:finishedWorkCap,
+      purpose:'receipt-payload'});await artifactRuntime.writeOwnedTemp({sessionCapability:finishedWorkCap,operationId:temp.operationId,
       purpose:'receipt-payload'},Buffer.from('{"schema_version":"1.0","status":"complete"}\n'));
   const finished=await dispatch(['session','finish','keep','--state',state,'--session',session,'--receipt-payload',temp.path],{cwd:root});
   assert.equal(finished.status,'completed');assert.equal(finished.outcome,'keep');

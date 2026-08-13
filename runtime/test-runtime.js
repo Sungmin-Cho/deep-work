@@ -73,10 +73,8 @@ function failureTransition({state,plan,receipts,failedSlices,exhausted}){
   if(!Number.isSafeInteger(retryCount)||retryCount<0||
       !Number.isSafeInteger(max)||max<0)fail('test-retry-count');
   if(exhausted?(retryCount<max):(retryCount>=max))fail('test-retry-boundary');
-  const currentGeneration=state.receipt_recovery_generation===undefined?
-    retryCount:state.receipt_recovery_generation;
-  if(!Number.isSafeInteger(currentGeneration)||currentGeneration<0)
-    fail('receipt-recovery-generation');
+  let currentGeneration;try{currentGeneration=functionalReceipt
+    .recoveryGenerationFromFields(state);}catch{fail('receipt-recovery-generation');}
   const slices=plan?.slices||[],failedIds=new Set(failedSlices);
   if(failedSlices.some((id)=>!slices.some((slice)=>slice?.id===id)))
     fail('failed-slice-plan');
@@ -85,42 +83,65 @@ function failureTransition({state,plan,receipts,failedSlices,exhausted}){
     for(const slice of slices)
       if(slice.slice_kind==='release-verification')invalidatedIds.add(slice.id);
   const ids=[...invalidatedIds].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
-  const nextGeneration=Math.max(currentGeneration,retryCount)+1;
+  const nextGeneration=currentGeneration+1;
+  const nextPlan=clone(plan);const nextReceipts=clone(receipts);
   const nextState={...clone(state),current_phase:'implement',implement_completed_at:null,
     receipt_recovery_generation:nextGeneration,test_passed:false};
   if(!exhausted)nextState.test_retry_count=retryCount+1;
   const functionalFailedIds=slices.filter((slice)=>
     failedIds.has(slice.id)&&slice.slice_kind==='functional').map((slice)=>slice.id);
+  const invalidatedFunctionalReceipts=functionalFailedIds.map((id)=>{
+    const receipt=receipts[id];
+    const receiptSha256=/^[0-9a-f]{64}$/.test(receipt?.receipt_sha256||'')?
+      receipt.receipt_sha256:null;
+    const completionOperationId=/^op-[0-9a-f]{64}$/.test(
+      receipt?.completion_operation_id||'')?receipt.completion_operation_id:null;
+    const completePair=receiptSha256!==null&&completionOperationId!==null;
+    return{slice_id:id,receipt_sha256:completePair?receiptSha256:null,
+      completion_operation_id:completePair?completionOperationId:null};
+  });
   const releaseInvalidated=slices.some((slice)=>
     invalidatedIds.has(slice.id)&&slice.slice_kind==='release-verification');
-  if(functionalFailedIds.length){
+  if(slices.some((slice)=>slice.slice_kind==='functional')){
     let bindings=functionalReceipt.parseFunctionalReceiptBindings(
       state.functional_receipt_bindings_json);
+    for(const slice of slices){
+      const existing=nextReceipts[slice.id];
+      if(slice.slice_kind!=='functional'||!slice.checked||
+          failedIds.has(slice.id)||!existing||existing.status==='invalidated'||
+          !/^[0-9a-f]{64}$/.test(existing.receipt_sha256||'')||
+          !/^op-[0-9a-f]{64}$/.test(existing.completion_operation_id||''))
+        continue;
+      bindings=functionalReceipt.setFunctionalReceiptBinding(bindings,slice.id,
+        functionalReceipt.receiptBindingFromReceipt(existing,currentGeneration));
+    }
     for(const id of functionalFailedIds)
       bindings=functionalReceipt.invalidateFunctionalReceiptBinding(
         bindings,id,nextGeneration);
     nextState.functional_receipt_bindings_json=
       functionalReceipt.serializeFunctionalReceiptBindings(bindings);
-    nextState.functional_receipt_sha256=null;
-    nextState.functional_completion_operation_id=null;
+    if(functionalFailedIds.length){
+      nextState.functional_receipt_sha256=null;
+      nextState.functional_completion_operation_id=null;
+    }
   }
   if(releaseInvalidated){
     nextState.release_verification_receipt_sha256=null;
     nextState.release_verification_operation_id=null;
   }
-  const nextPlan=clone(plan);const nextReceipts=clone(receipts);
   for(const slice of nextPlan.slices||[])if(invalidatedIds.has(slice.id))slice.checked=false;
   for(const id of ids){
     const slice=nextPlan.slices.find((row)=>row.id===id);
     if(!nextReceipts[id]){
-      if(failedIds.has(id)||slice?.checked===true)fail('failed-slice-receipt');
+      const beforeSlice=slices.find((row)=>row.id===id);
+      if(failedIds.has(id)||beforeSlice?.checked===true)fail('failed-slice-receipt');
       continue;
     }
     nextReceipts[id].status='invalidated';
   }
   return {state:nextState,plan:nextPlan,receipts:nextReceipts,
     failedSlices:[...failedIds].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b))),
-    invalidatedSlices:ids};
+    invalidatedSlices:ids,invalidatedFunctionalReceipts};
 }
 
 function failureStatePatch(state){
@@ -147,26 +168,41 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
     failedIds.includes(slice.id)&&slice.slice_kind==='functional');
   const ids=[...new Set([...failedIds,...(functionalFailure?planSlices.filter((slice)=>
     slice.slice_kind==='release-verification').map((slice)=>slice.id):[])])].sort((a,b)=>
-    Buffer.compare(Buffer.from(a),Buffer.from(b)));const sessionId=
+    Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const functionalIds=planSlices.filter((slice)=>slice?.slice_kind==='functional')
+    .map((slice)=>slice.id).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const sessionId=
     transaction.sessionIdFromState(stateCapability);const projectCapability=transaction.projectCapabilityFor(stateCapability);const root=
     stateCapability.projectRoot;const operationLock=issueProjectStateCapability(root,path.join(root,'.claude',
       `deep-work.${sessionId}.rank-operation.lock`),{allowMissingLeaf:true,role:'lock'});const journalLock=issueProjectStateCapability(root,
       path.join(root,'.claude',`deep-work.${sessionId}.rank-journal.lock`),{allowMissingLeaf:true,role:'lock'});const receiptCaps=
-    Object.fromEntries(ids.map((id)=>[id,receiptCapability(receiptsDirCapability,id)]));const targetPaths=[planCapability.path,
-      ...Object.values(receiptCaps).map((cap)=>cap.path)].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
-  const targets=targetPaths.map((target)=>({rank:transaction.RANKS.target,capability:issueProjectStateCapability(root,
-    path.join(root,'.claude',`deep-work.target.${crypto.createHash('sha256').update(path.relative(root,target)).digest('hex')}.lock`),
-    {allowMissingLeaf:true,role:'lock'})})).sort((a,b)=>Buffer.compare(Buffer.from(a.capability.path),Buffer.from(b.capability.path)));
-  const kind=exhausted?'test-exhaust':'test-retry';return transaction.withRankedLocks([
+    Object.fromEntries(ids.map((id)=>[id,receiptCapability(receiptsDirCapability,id)]));
+  const functionalReceiptCaps=Object.fromEntries(functionalIds.map((id)=>[
+    id,receiptCapability(receiptsDirCapability,id)]));
+  const allReceiptCaps={...receiptCaps,...functionalReceiptCaps};
+  const targetPaths=[planCapability.path,...Object.values(allReceiptCaps)
+    .map((cap)=>cap.path)].sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b)));
+  const kind=exhausted?'test-exhaust':'test-retry';
+  return transaction.withRankedLocks([
     {rank:transaction.RANKS.session,capability:operationLock},{rank:transaction.RANKS.journal,capability:journalLock},
-    {rank:transaction.RANKS.state,capability:transaction.stateLock(stateCapability)},...targets],async()=>{
+    {rank:transaction.RANKS.state,capability:transaction.stateLock(stateCapability)},...targetPaths
+      .map((target)=>({rank:transaction.RANKS.target,capability:issueProjectStateCapability(root,
+        path.join(root,'.claude',`deep-work.target.${crypto.createHash('sha256').update(path.relative(root,target)).digest('hex')}.lock`),
+        {allowMissingLeaf:true,role:'lock'})}))
+      .sort((a,b)=>Buffer.compare(Buffer.from(a.capability.path),Buffer.from(b.capability.path)))],async()=>{
     const preconditions={at,failedSlices:failedIds,exhausted:Boolean(exhausted)};const operation=await beginOperation({projectCapability,
       sessionId,kind,preconditions});let pending=await resumeOperation({projectCapability,operationId:operation.operationId,sessionId,kind});
     const stateText=fs.readFileSync(stateCapability.path,'utf8');const planBytes=transaction.readSessionFile(planCapability);const receiptBytes=
       Object.fromEntries(ids.map((id)=>[id,fs.existsSync(receiptCaps[id].path)?transaction.readSessionFile(receiptCaps[id]):null]));let prepared=pending.stages?.find(
       (row)=>row.stage==='stores-prepared')?.details?.owned;if(!prepared){const currentState=transaction.readState(stateCapability);let currentPlan;
       try{currentPlan=JSON.parse(planBytes);}catch{fail('test-plan-json');}if(plan&&canonicalJson(plan)!==canonicalJson(currentPlan))fail('test-plan-changed');
-      const currentReceipts={};for(const id of ids)if(receiptBytes[id]!==null)try{currentReceipts[id]=JSON.parse(receiptBytes[id]);}catch{fail('test-receipt-json');}
+      const currentReceipts={};
+      for(const id of ids)if(receiptBytes[id]!==null)try{currentReceipts[id]=JSON.parse(receiptBytes[id]);}catch{fail('test-receipt-json');}
+      for(const id of functionalIds)if(currentReceipts[id]===undefined&&
+          fs.existsSync(functionalReceiptCaps[id].path))try{
+        currentReceipts[id]=JSON.parse(transaction.readSessionFile(
+          functionalReceiptCaps[id]));
+      }catch{fail('test-receipt-json');}
       const changed=failureTransition({state:currentState,plan:currentPlan,receipts:currentReceipts,failedSlices:failedIds,exhausted});
       const nextPlanBytes=Buffer.from(canonicalJson(changed.plan));const nextReceiptBytes=Object.fromEntries(ids
         .filter((id)=>changed.receipts[id]!==undefined)
@@ -180,6 +216,7 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
           afterSha256:nextReceiptBytes[id]===undefined?null:sha256(nextReceiptBytes[id])})),
         nextTestRetryCount:changed.state.test_retry_count??null,
         nextReceiptRecoveryGeneration:changed.state.receipt_recovery_generation,
+        invalidatedFunctionalReceipts:changed.invalidatedFunctionalReceipts,
         statePatch};
       await recordOperationStage(operation,'stores-prepared',{owned:prepared});}
     if(prepared.statePath!==stateCapability.path||prepared.planPath!==planCapability.path||canonicalJson(prepared.receiptRows.map(
@@ -214,6 +251,9 @@ async function journaledFailure({stateCapability,planCapability,plan,receiptsDir
     const finalState=transaction.readState(stateCapability);if(sha256(canonicalJson(finalState))!==prepared.stateAfterFieldsSha256)
       fail('test-state-postcondition');
     const result={status:'completed',failedSlices:failedIds,invalidatedSlices:ids,
+      recovery_generation:prepared.nextReceiptRecoveryGeneration,
+      invalidated_slices:ids,
+      invalidated_functional_receipts:prepared.invalidatedFunctionalReceipts||[],
       planSha256:prepared.planAfterSha256,receiptSha256,
       stateSha256:prepared.stateAfterFieldsSha256};const operationReceipt=await completeOperation(operation,result);return{state:finalState,
       plan:finalPlan,receipts:finalReceipts,operationId:operation.operationId,operationReceipt};

@@ -506,20 +506,32 @@ function loadPlan(planCapability,plan){
   return current;
 }
 function buildReleaseVerificationCompletionPreconditions({sessionId,sliceId,current,
-  fields,gateResults,functional}={}){
+  fields,gateResults,functional,projectCapability}={}){
   const preconditions={session_id:sessionId,slice_id:sliceId,
     plan_authority_sha256:current.plan_authority_sha256,
     verification_plan_sha256:fields.verification_plan_sha256,
     gate_results:gateResults,functional_receipts:functional};
-  const retryCount=fields.test_retry_count===undefined?0:fields.test_retry_count;
-  const persistedGeneration=fields.receipt_recovery_generation===undefined?
-    retryCount:fields.receipt_recovery_generation;
-  if(!Number.isSafeInteger(retryCount)||retryCount<0||
-      !Number.isSafeInteger(persistedGeneration)||persistedGeneration<0)
+  let retryGeneration;try{
+      const runtime=require('./functional-receipt-runtime.js');
+      retryGeneration=runtime.recoveryGenerationFromFields(fields);
+      if(projectCapability){
+        const history=runtime.recoveryGenerationFloor({projectCapability,sessionId});
+        if(history.hasRows&&!Object.hasOwn(fields,
+            'receipt_recovery_generation')||!history.historyComplete||
+            retryGeneration<history.floor)
+          fail('release-verification-state');
+      retryGeneration=Math.max(retryGeneration,history.floor);
+    }
+  }catch(error){
+    if(error.code==='release-verification-state')throw error;
     fail('release-verification-state');
-  const retryGeneration=Math.max(retryCount,persistedGeneration);
+  }
   if(retryGeneration>0)preconditions.retry_generation=retryGeneration;
   return preconditions;
+}
+function releaseVerificationOperationId(args){
+  return operationId('release-verification-complete-v1',
+    buildReleaseVerificationCompletionPreconditions(args));
 }
 function assertStoredReleaseVerificationReceipt(file,receipt,code='release-verification-recovery'){
   if(!fs.existsSync(file))fail(code);
@@ -831,9 +843,12 @@ function releaseDocsRulePath(root,toolchain){
   return fallback;
 }
 function legacyV7SurfaceViolations({activeVersion,versions}={}){
+  if(!SEMVER.test(String(activeVersion||''))||!Array.isArray(versions)||
+      versions.some((row)=>!Array.isArray(row)||row.length!==2||
+        typeof row[0]!=='string'||!row[0]||!SEMVER.test(String(row[1]||''))))
+    fail('release-integrity-manifest');
   const activeMajor=Number.parseInt(String(activeVersion).split('.')[0],10);
-  if(!Number.isSafeInteger(activeMajor)||activeMajor>=7||!Array.isArray(versions))
-    return[];
+  if(!Number.isSafeInteger(activeMajor)||activeMajor>=7)return[];
   return versions.filter(([,version])=>/^7\./.test(String(version)))
     .map(([file])=>file).sort((a,b)=>Buffer.compare(Buffer.from(a),
       Buffer.from(b)));
@@ -1132,7 +1147,6 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
     require('./functional-receipt-runtime.js');
   const fields=frontmatter.parseFrontmatter(
     fs.readFileSync(stateCapability.path,'utf8')).fields;
-  const requireBinding=runtime.requiresFunctionalReceiptBinding(fields);
   for(const ref of refs){
     const relative=`.deep-work/${sid}/receipts/${ref.slice_id}.json`;
     const raw=readCanonical(path.join(stateCapability.projectRoot,
@@ -1141,8 +1155,14 @@ async function authenticateFunctionalReceiptRefs({stateCapability,plan,refs}={})
     const producer=await journal.resumeOperation({projectCapability:project,
       operationId:ref.completion_operation_id,sessionId:sid,
       kind:'functional-slice-complete-v2'});
+    const invalidation=runtime.recoveryInvalidationState({
+      projectCapability:project,sessionId:sid,sliceId:ref.slice_id});
     runtime.authenticateFunctionalReceiptBinding({fields,sliceId:ref.slice_id,
-      receipt,requireBinding});
+      receipt,requireBinding:runtime.requiresFunctionalReceiptBinding(fields,
+        ref.slice_id,invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
     const result=producer.result;
     if(receipt.receipt_sha256!==ref.receipt_sha256||
         receipt.completion_operation_id!==ref.completion_operation_id||
@@ -1273,9 +1293,12 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     fail('release-verification-gates');
   const functional=await authenticateFunctionalReceiptRefs({stateCapability,
     plan:current,refs:functionalReceipts});
+  const project=transaction.projectCapabilityFor(stateCapability);
   const preconditions=buildReleaseVerificationCompletionPreconditions({
-    sessionId:sid,sliceId,current,fields,gateResults,functional});
-  const id=operationId('release-verification-complete-v1',preconditions);
+    sessionId:sid,sliceId,current,fields,gateResults,functional,
+    projectCapability:project});
+  const id=releaseVerificationOperationId({sessionId:sid,sliceId,current,fields,
+    gateResults,functional,projectCapability:project});
   const receipt={schema_version:1,slice_id:sliceId,
     plan_authority_sha256:current.plan_authority_sha256,
     verification_plan_sha256:fields.verification_plan_sha256,
@@ -1284,7 +1307,6 @@ async function publishReleaseVerificationReceipt({stateCapability,planCapability
     receipt_sha256:null};
   receipt.receipt_sha256=releaseReceiptDigest(receipt);
   const relative=`.deep-work/${sid}/receipts/${sliceId}.json`;
-  const project=transaction.projectCapabilityFor(stateCapability);
   const existing=await journal.resumeOperation({projectCapability:project,
     operationId:id,sessionId:sid,kind:'release-verification-complete'}).catch(
       (error)=>{if(error.code==='operation-not-found')return null;throw error;});
@@ -1385,5 +1407,6 @@ module.exports={RELEASE_GATE_CATALOG,DETERMINISTIC_GATE_MAPPING,
   isInvalidatedReleaseReceipt,
   validateReleaseCompletionLedger,replaceInvalidatedReleaseReceipt,
   buildReleaseVerificationCompletionPreconditions,
+  releaseVerificationOperationId,
   releaseReceiptTargetLocks,
   publishReleaseVerificationReceipt,semanticDigest,legacyV7SurfaceViolations};

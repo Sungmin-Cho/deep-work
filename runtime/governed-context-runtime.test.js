@@ -68,13 +68,24 @@ test('receipt projection classifies authenticated release invalidation as incomp
         key!=='receipt_sha256'))));
     fs.writeFileSync(path.join(receipts,'SLICE-001.json'),journal.canonicalJson({
       ...receipt,status:'invalidated'}));
-    const projection=receiptProjection(work,{slices:[{id:'SLICE-001',
-      slice_kind:'release-verification',checked:false}]},false,stateCapability,
+    const projection=receiptProjection(work,{plan_authority_sha256:'1'.repeat(64),
+      slices:[{id:'SLICE-001',slice_kind:'release-verification',checked:false}]},false,stateCapability,
       {verification_plan_sha256:'2'.repeat(64)});
     assert.deepEqual(projection.rows,[{slice_id:'SLICE-001',
       slice_kind:'release-verification',status:'invalidated',
       receipt_sha256:receipt.receipt_sha256}]);
     assert.equal(projection.status,'incomplete');
+    const forged={...receipt,plan_authority_sha256:'3'.repeat(64)};
+    forged.receipt_sha256=journal.sha256(journal.canonicalJson(
+      Object.fromEntries(Object.entries(forged).filter(([key])=>
+        key!=='receipt_sha256'))));
+    fs.writeFileSync(path.join(receipts,'SLICE-001.json'),journal.canonicalJson({
+      ...forged,status:'invalidated'}));
+    const rejected=receiptProjection(work,{plan_authority_sha256:'1'.repeat(64),
+      slices:[{id:'SLICE-001',slice_kind:'release-verification',checked:false}]},
+      false,stateCapability,{verification_plan_sha256:'2'.repeat(64)});
+    assert.equal(rejected.rows[0].status,'unknown');
+    assert.equal(rejected.status,'unknown');
   });
 
 test('release projection rejects a stale embedded functional receipt',async(t)=>{
@@ -123,12 +134,18 @@ test('release projection rejects a stale embedded functional receipt',async(t)=>
   release.receipt_sha256=journal.sha256(journal.canonicalJson(
     Object.fromEntries(Object.entries(release).filter(([key])=>
       key!=='receipt_sha256'))));
-  stateFields.release_verification_operation_id=release.completion_operation_id;
-  stateFields.release_verification_receipt_sha256=release.receipt_sha256;
-  fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',stateFields));
   const plan={schema_version:2,plan_authority_sha256:'8'.repeat(64),slices:[
     {id:'SLICE-001',slice_kind:'functional',checked:true},
     {id:'SLICE-002',slice_kind:'release-verification',checked:true}]};
+  release.completion_operation_id=releaseRuntime.releaseVerificationOperationId({
+    sessionId,sliceId:'SLICE-002',current:plan,fields:stateFields,
+    gateResults:release.gate_results,functional:release.functional_receipts});
+  release.receipt_sha256=journal.sha256(journal.canonicalJson(
+    Object.fromEntries(Object.entries(release).filter(([key])=>
+      key!=='receipt_sha256'))));
+  stateFields.release_verification_operation_id=release.completion_operation_id;
+  stateFields.release_verification_receipt_sha256=release.receipt_sha256;
+  fs.writeFileSync(statePath,frontmatter.updateFrontmatterText('',stateFields));
   fs.writeFileSync(path.join(work,'plan.json'),journal.canonicalJson(plan));
   fs.writeFileSync(path.join(receipts,'SLICE-001.json'),
     journal.canonicalJson(functional));

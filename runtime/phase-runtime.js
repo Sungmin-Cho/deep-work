@@ -216,7 +216,12 @@ function rerunPhase({state,stateCapability,phase,affectedSlices=[],seam}={}) {
   if (!['brainstorm','research','spec','plan','implement','test'].includes(phase)) fail('phase-rerun');
   const next=clone(state);
   delete next[`${phase}_completed_at`]; delete next[`${phase}_approved`];
-  if (phase==='test') {next.test_passed=false;next.test_retry_count=0;}
+  if (phase==='test') {
+    const functionalReceipt=require('./functional-receipt-runtime.js');
+    next.receipt_recovery_generation=
+      functionalReceipt.recoveryGenerationFromFields(state);
+    next.test_passed=false;next.test_retry_count=0;
+  }
   return next;
 }
 

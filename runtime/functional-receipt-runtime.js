@@ -18,17 +18,136 @@ function semanticDigest(domain,value,omitted){
   return crypto.createHash('sha256').update(Buffer.concat([
     Buffer.from(`${domain}\0`),Buffer.from(canonicalJson(copy))])).digest('hex');
 }
+function validateRecoveryGenerationSequence(result,previousGeneration){
+  const generation=result?.recovery_generation;
+  if(generation===undefined)return{generation:null,previousGeneration};
+  if(!Number.isSafeInteger(generation)||generation<0||
+      previousGeneration!==null&&generation<previousGeneration)
+    fail('functional-recovery-history');
+  return{generation,previousGeneration:generation};
+}
 function recoveryGenerationFromFields(fields={}){
   const retry=fields.test_retry_count===undefined?0:fields.test_retry_count;
-  const persisted=fields.receipt_recovery_generation===undefined?
-    retry:fields.receipt_recovery_generation;
+  const persistedPresent=Object.hasOwn(fields,'receipt_recovery_generation');
+  const persisted=persistedPresent?fields.receipt_recovery_generation:retry;
   if(!Number.isSafeInteger(retry)||retry<0||!Number.isSafeInteger(persisted)||
       persisted<0)fail('functional-recovery-generation');
-  return Math.max(retry,persisted);
+  if(persistedPresent&&persisted<retry)fail('functional-recovery-generation');
+  return persisted;
 }
-function requiresFunctionalReceiptBinding(fields={}){
+function requiresFunctionalReceiptBinding(fields={},sliceId=null,
+  invalidationFloor=0,invalidationHistoryComplete=true){
+  if(!Number.isSafeInteger(invalidationFloor)||invalidationFloor<0)
+    fail('functional-recovery-generation');
+  if(typeof invalidationHistoryComplete!=='boolean')
+    fail('functional-recovery-history');
+  if(invalidationFloor>0&&!Object.hasOwn(fields||{},
+      'receipt_recovery_generation'))
+    fail('functional-recovery-generation');
+  const bindings=parseFunctionalReceiptBindings(
+    fields.functional_receipt_bindings_json);
+  if(sliceId!==null)return recoveryGenerationFromFields(fields)>0||
+    invalidationFloor>0||!invalidationHistoryComplete||
+    Object.hasOwn(bindings,sliceId);
   return recoveryGenerationFromFields(fields)>0||
-    Object.hasOwn(fields,'functional_receipt_bindings_json');
+    !invalidationHistoryComplete||Object.hasOwn(fields,
+      'functional_receipt_bindings_json');
+}
+function recoveryInvalidationFloor({projectCapability,sessionId,sliceId}={}){
+  return recoveryInvalidationState({projectCapability,sessionId,sliceId}).floor;
+}
+function recoveryInvalidationState({projectCapability,sessionId,sliceId}={}){
+  if(!SLICE.test(sliceId||''))fail('functional-recovery-history');
+  const journal=require('./operation-journal.js');
+  const rows=journal.listCompletedOperations({projectCapability,sessionId})
+    .filter((row)=>row.kind==='test-retry'||row.kind==='test-exhaust');
+  let floor=0;const identities=[];let hasRelevantRow=false;
+  let latestCompleteGeneration=-1;let lastRelevantComplete=true;
+  let previousGeneration=null;
+  for(const row of rows){
+    const result=row.result;
+    if(row.resultSha256!==journal.sha256(journal.canonicalJson(result)))
+      fail('functional-recovery-history');
+    const checkedGeneration=validateRecoveryGenerationSequence(result,
+      previousGeneration);
+    previousGeneration=checkedGeneration.previousGeneration;
+    const generation=checkedGeneration.generation;
+    const invalidated=Array.isArray(result?.invalidated_slices)?
+      result.invalidated_slices:result?.invalidatedSlices;
+    if(!Array.isArray(invalidated)){
+      const failed=Array.isArray(result?.failedSlices)?result.failedSlices:
+        result?.failed_slices;
+      if(!Array.isArray(failed)||failed.includes(sliceId)){
+        hasRelevantRow=true;lastRelevantComplete=false;
+      }
+      continue;
+    }
+    if(!invalidated.includes(sliceId))continue;
+    hasRelevantRow=true;
+    if(generation===null)fail('functional-recovery-history');
+    floor=Math.max(floor,generation);
+    if(!Array.isArray(result.invalidated_functional_receipts)){
+      lastRelevantComplete=false;continue;
+    }
+    for(const identity of result.invalidated_functional_receipts){
+      if(!exactKeys(identity,['slice_id','receipt_sha256',
+          'completion_operation_id'])||!SLICE.test(identity.slice_id||'')||
+          !(identity.receipt_sha256===null||DIGEST.test(identity.receipt_sha256||''))||
+          !(identity.completion_operation_id===null||
+            OPERATION.test(identity.completion_operation_id||''))||
+          (identity.receipt_sha256===null)!==(identity.completion_operation_id===null))
+        fail('functional-recovery-history');
+      if(identity.slice_id===sliceId&&identity.receipt_sha256!==null)
+        identities.push({receipt_sha256:identity.receipt_sha256,
+          completion_operation_id:identity.completion_operation_id});
+    }
+    latestCompleteGeneration=Math.max(latestCompleteGeneration,
+      generation);
+    lastRelevantComplete=true;
+  }
+  const historyComplete=!hasRelevantRow||(lastRelevantComplete&&
+    latestCompleteGeneration>=floor);
+  return{floor,identities,historyComplete};
+}
+function recoveryGenerationFloor({projectCapability,sessionId}={}){
+  const journal=require('./operation-journal.js');
+  const rows=journal.listCompletedOperations({projectCapability,sessionId})
+    .filter((row)=>row.kind==='test-retry'||row.kind==='test-exhaust');
+  let floor=0;let hasRows=false;let lastRowComplete=true;
+  let latestCompleteGeneration=-1;
+  let previousGeneration=null;
+  for(const row of rows){
+    hasRows=true;
+    const result=row.result;
+    if(row.resultSha256!==journal.sha256(journal.canonicalJson(result)))
+      fail('functional-recovery-history');
+    const checkedGeneration=validateRecoveryGenerationSequence(result,
+      previousGeneration);
+    previousGeneration=checkedGeneration.previousGeneration;
+    const generation=checkedGeneration.generation;
+    const invalidated=Array.isArray(result?.invalidated_slices)?
+      result.invalidated_slices:result?.invalidatedSlices;
+    if(generation===null){lastRowComplete=false;continue;}
+    floor=Math.max(floor,generation);
+    if(!Array.isArray(invalidated)||
+        !Array.isArray(result.invalidated_functional_receipts)){
+      lastRowComplete=false;continue;
+    }
+    for(const identity of result.invalidated_functional_receipts){
+      if(!exactKeys(identity,['slice_id','receipt_sha256',
+          'completion_operation_id'])||!SLICE.test(identity.slice_id||'')||
+          !(identity.receipt_sha256===null||DIGEST.test(identity.receipt_sha256||''))||
+          !(identity.completion_operation_id===null||
+            OPERATION.test(identity.completion_operation_id||''))||
+          (identity.receipt_sha256===null)!==(identity.completion_operation_id===null))
+        fail('functional-recovery-history');
+    }
+    latestCompleteGeneration=Math.max(latestCompleteGeneration,generation);
+    lastRowComplete=true;
+  }
+  const historyComplete=!hasRows||(lastRowComplete&&
+    latestCompleteGeneration>=floor);
+  return{floor,historyComplete,hasRows};
 }
 function parseFunctionalReceiptBindings(value){
   if(value===undefined||value===null||value==='')return{};
@@ -69,11 +188,23 @@ function invalidateFunctionalReceiptBinding(value,sliceId,recoveryGeneration){
     recoveryGeneration,receipt_sha256:null,completion_operation_id:null});
 }
 function authenticateFunctionalReceiptBinding({fields,sliceId,receipt,
-  requireBinding=false,invalidated=false}={}){
+  requireBinding=false,invalidated=false,minRecoveryGeneration=0,
+  invalidatedReceiptIdentities=[],invalidationHistoryComplete=true}={}){
+  if(!Number.isSafeInteger(minRecoveryGeneration)||minRecoveryGeneration<0)
+    fail('functional-recovery-generation');
+  if(minRecoveryGeneration>0&&!invalidationHistoryComplete)
+    fail('functional-recovery-history');
+  if(!Array.isArray(invalidatedReceiptIdentities))
+    fail('functional-recovery-history');
+  if(!invalidated&&invalidatedReceiptIdentities.some((identity)=>
+      identity?.receipt_sha256===receipt?.receipt_sha256&&
+      identity?.completion_operation_id===receipt?.completion_operation_id))
+    fail('functional-receipt-binding');
   const binding=parseFunctionalReceiptBindings(fields?.functional_receipt_bindings_json)[sliceId];
   if(!binding){if(requireBinding)fail('functional-receipt-binding');return true;}
   const generation=recoveryGenerationFromFields(fields);
-  if(binding.recovery_generation>generation)
+  if(binding.recovery_generation<minRecoveryGeneration||
+      binding.recovery_generation>generation)
     fail('functional-receipt-binding');
   if(invalidated){
     if(binding.recovery_generation!==generation||
@@ -88,7 +219,8 @@ function receiptBindingFromReceipt(receipt,recoveryGeneration){
   if(!Number.isSafeInteger(recoveryGeneration)||recoveryGeneration<0)
     fail('functional-recovery-generation');
   if(!DIGEST.test(receipt?.receipt_sha256||'')||
-      !OPERATION.test(receipt?.completion_operation_id||''))return null;
+      !OPERATION.test(receipt?.completion_operation_id||''))
+    fail('functional-receipt-binding');
   return{recovery_generation:recoveryGeneration,
     receipt_sha256:receipt.receipt_sha256,
     completion_operation_id:receipt.completion_operation_id};
@@ -310,6 +442,7 @@ async function authenticateRedProof({stateCapability,plan,sliceId,fields}){
   const proof=readCanonical(path.join(root,...expected.split('/')),
     'functional-red-proof',16*1024*1024,true).value;
   const project=transaction.projectCapabilityFor(stateCapability);
+  recoveryInvalidationState({projectCapability:project,sessionId:sid,sliceId});
   if(proof.transition_kind==='bootstrap-adoption'){
     const bootstrap=require('./bootstrap-runtime.js');
     const control=path.join(root,'.deep-work',sid,'bootstrap');
@@ -474,6 +607,8 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
     green_verification:green.ref,refactor_evidence:refactor});
   const operationId=receipt.completion_operation_id;
   const project=transaction.projectCapabilityFor(stateCapability);
+  const invalidation=recoveryInvalidationState({projectCapability:project,
+    sessionId:sid,sliceId});
   const completed=await journal.resumeOperation({projectCapability:project,
     operationId,sessionId:sid,kind:'functional-slice-complete-v2'})
     .catch((error)=>{if(error.code==='operation-not-found')return null;throw error;});
@@ -486,7 +621,11 @@ async function publishFunctionalSliceReceiptV2({stateCapability,planCapability,p
       fail('functional-recovery-fresh-evidence');
     const stored=validateFunctionalSliceReceiptV2(storedRaw);
     authenticateFunctionalReceiptBinding({fields,sliceId,receipt:stored,
-      requireBinding:requiresFunctionalReceiptBinding(fields)});
+      requireBinding:requiresFunctionalReceiptBinding(fields,sliceId,
+        invalidation.floor,invalidation.historyComplete),
+      minRecoveryGeneration:invalidation.floor,
+      invalidatedReceiptIdentities:invalidation.identities,
+      invalidationHistoryComplete:invalidation.historyComplete});
     if(canonicalJson(stored)!==canonicalJson(receipt))
       fail('functional-completion-ledger');
     const result=validateFunctionalCompletionLedger(completed,{sessionId:sid,
@@ -587,6 +726,9 @@ module.exports={validateVerificationResultRefV1,validateSensorResultRefV1,
   authenticateRedProof,buildFunctionalReceiptTargetLocks,
   publishFunctionalSliceReceiptV2,semanticDigest,recoveryGenerationFromFields,
   requiresFunctionalReceiptBinding,
+  recoveryInvalidationFloor,
+  recoveryInvalidationState,
+  recoveryGenerationFloor,
   parseFunctionalReceiptBindings,serializeFunctionalReceiptBindings,
   setFunctionalReceiptBinding,invalidateFunctionalReceiptBinding,
   authenticateFunctionalReceiptBinding,receiptBindingFromReceipt};
