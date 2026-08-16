@@ -7,6 +7,12 @@ All notable changes to the Deep Work plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Model-router shadow comparison.** After `model-routing-cli.js`, session init and research reroute record a `router_shadow` observation on `model_routing_meta_json`. Dispatch authority stays the existing CLI JSON.
+
 ## [7.1.5] — 2026-08-13 (Strict Recovery Evidence Closure)
 
 ### Fixed

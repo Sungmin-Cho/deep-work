@@ -7,6 +7,12 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [Unreleased]
+
+### Added
+
+- **Model-router 섀도 비교.** `model-routing-cli.js` 직후 세션 초기화와 research 재라우팅이 `model_routing_meta_json.router_shadow`에 관측만 기록합니다. dispatch 권위는 기존 CLI JSON입니다.
+
 ## [7.1.5] — 2026-08-13 (Strict Recovery Evidence Closure)
 
 ### Fixed

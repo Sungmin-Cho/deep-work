@@ -263,7 +263,19 @@ MR_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/model-routing-cli.js" \
   --pinned "<decodedRoutingMeta.pinned as phase=value CSV>" \
   --runtime "$ROUTING_RUNTIME" \
   --methodology-policy "$METHODOLOGY_AUTHORITY")
+MR_FILE=$(mktemp)
+printf '%s' "$MR_OUT" > "$MR_FILE"
+SHADOW_WRAP=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/router-shadow.js" \
+  --mr-out-file "$MR_FILE" \
+  --runtime "$ROUTING_RUNTIME" \
+  --risk-class "$AUTH_CLASS" \
+  --task-class INVESTIGATION \
+  --frozen-digest "<decodedRoutingMeta.router_shadow.policy_sha256 or empty>")
+rm -f "$MR_FILE"
 ```
+`$MR_OUT` remains the dispatch authority. Merge only `SHADOW_WRAP.shadow` into
+`model_routing_meta_json.router_shadow`. A later `policy_sha256` mismatch is
+recorded as `status: invalid` and must not rewrite `model_routing`.
 
 4. state를 한 번의 atomic RMW로 갱신한다.
    - `risk_profile_json.authoritative`에 profile/input_ref/evidence_refs를 기록하고 transition은
@@ -272,11 +284,12 @@ MR_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/model-routing-cli.js" \
      `RISK_OUT.error`도 같은 배열에 기록한다.
    - `policy_shadow_json.authoritative`에 `RISK_OUT.policy_snapshot`을 병합하되 provisional은
      보존한다.
-   - 재라우팅 성공 시 `model_routing_json`과 `model_routing_meta_json`을 각각 MR_OUT의
-     routing/meta JSON-string으로 교체하고, `methodology_policy_json`을
+   - 재라우팅 성공 시 `model_routing_json`은 MR_OUT의 routing JSON-string으로
+     교체하고, `model_routing_meta_json`은 `{ ...MR_OUT.meta, router_shadow: SHADOW_WRAP.shadow }`
+     JSON-string으로 교체한다. `methodology_policy_json`을
      `RISK_OUT.methodology_authority`의 exact JSON으로 교체한다. 저장 전후
      `policy_sha256`를 재검증하며 routing meta의 `methodology_policy_sha256`와
-     동일해야 한다.
+     동일해야 한다. `router_shadow`는 관측 전용이다.
    - high/critical이고 `floor_overridden_by_pin`이 true인 phase마다
      `⚠️ 사용자 pin이 <phase> policy floor보다 낮습니다`를 1회 표시한다.
 5. 요약 1줄: `Risk: <provisional class> → <authoritative class> (policy: <profile>)`.

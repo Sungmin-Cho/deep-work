@@ -155,7 +155,18 @@ MR_OUT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/model-routing-cli.js" \
   --difficulty "${REC_TASK_DIFFICULTY:-}" --pinned "${FLAGS.model_routing:-}" \
   --runtime "$ROUTING_RUNTIME" \
   --methodology-policy "$METHODOLOGY_AUTHORITY")
+MR_FILE=$(mktemp)
+printf '%s' "$MR_OUT" > "$MR_FILE"
+SHADOW_WRAP=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/router-shadow.js" \
+  --mr-out-file "$MR_FILE" \
+  --runtime "$ROUTING_RUNTIME" \
+  --risk-class "$RISK_CLASS" \
+  --task-class IMPLEMENTATION)
+rm -f "$MR_FILE"
 ```
+`$MR_OUT` remains the dispatch authority. `$SHADOW_WRAP` is observation-only
+(`authority` is a clone; persist only `shadow` under `model_routing_meta_json.router_shadow`).
+The shadow CLI never fails the session: it always exits 0.
 
 프로필의 per-phase concrete pin은 `--pinned`에 병합하되 CLI pin이 우선한다. `MR_OUT.meta.policy.floor_overridden_by_pin`에 true가 있고 risk class가
 `high` 또는 `critical`이면 `⚠️ 사용자 pin이 <phase> policy floor보다 낮습니다`를 phase별
@@ -195,7 +206,7 @@ rm -f "$RISK_IN"
 - session_id, current_phase, task_description, work_dir
 - team_mode, tdd_mode, worktree_*, cross_model_*
 - **`model_routing_json`**: `JSON.stringify(MR_OUT.model_routing)`로 만든 한 줄 JSON-string 스칼라
-- **`model_routing_meta_json`**: `JSON.stringify(MR_OUT.meta)`로 만든 한 줄 JSON-string 스칼라
+- **`model_routing_meta_json`**: `JSON.stringify({ ...MR_OUT.meta, router_shadow: SHADOW_WRAP.shadow })`로 만든 한 줄 JSON-string 스칼라. `router_shadow`는 관측 전용이며 phase-guard/dispatch는 이 키를 읽지 않는다. `MR_OUT` 권위 바이트는 그대로 둔다.
 - **`risk_profile_json`, `policy_shadow_json`, `slice_risk_shadow_json`** (옵셔널, v6.11.0 — frontmatter JSON-string 스칼라, shadow 관찰 전용. phase-guard/gate enforcement에 영향 없음)
 - **`methodology_policy_json`, `review_execution_json`**. v7은 digest-bound
   `methodology-policy-v1` authority를 전자에 기록한다. legacy v6.12 shape는
