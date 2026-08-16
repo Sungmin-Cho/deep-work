@@ -354,6 +354,14 @@ test('review probes remain optional release tools',()=>{
   assert.deepEqual(launch.optional_tools,['codex','gemini']);
 });
 
+test('router-shadow python3 remains an optional release tool',()=>{
+  const shadow=scanner.scanLaunchSites('scripts/router-shadow.js',
+    Buffer.from("const {spawnSync}=require('node:child_process');\n"+
+      "spawnSync('python3',[cli,'--request-json',reqPath,'--format','json']);\n"));
+  assert.deepEqual(shadow.required_tools,[]);
+  assert.deepEqual(shadow.optional_tools,['python3']);
+});
+
 test('exact committed production release graph is scannable',
   {skip:process.platform==='win32'},()=>{
     const root=path.resolve(__dirname,'..');
@@ -361,8 +369,9 @@ test('exact committed production release graph is scannable',
       require('./platform.js').resolveGitExecutable(process.env,fs)});
     const files=scanner.loadCommittedFiles({root,gitIdentity,
       requireWorktreeMatch:false});
-    assert.doesNotThrow(()=>scanner.scanReleaseSources({
-      committedFiles:files}));
+    const result=scanner.scanReleaseSources({committedFiles:files});
+    assert.equal(result.required_tools.includes('python3'),false);
+    assert.equal(result.optional_tools.includes('python3'),true);
   });
 
 test('committed source loading binds an authenticated git and rejects worktree drift',

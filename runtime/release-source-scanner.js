@@ -396,6 +396,13 @@ function scanLaunchSites(path,bytes,{platformName=process.platform}={}){
         /probe\(\s*['"]gemini['"]\s*,\s*safeEnv\s*\)/.test(source)){
       optional.add('codex');optional.add('gemini');continue;
     }
+    if(first.type==='string'&&first.value==='python3'&&
+        (path==='scripts/router-shadow.js'||
+          path==='scripts/lib/locate-deep-model-router.js')&&
+        (/spawnSync\(\s*['"]python3['"]/.test(source)||
+          /exec\(\s*['"]python3['"]/.test(source))){
+      optional.add('python3');continue;
+    }
     if(path==='hooks/scripts/hook-runtime-portability.test.js'&&
         call.value==='spawnSync'&&first.type==='identifier'&&
         first.value==='resolveWindowsPowerShell'){
