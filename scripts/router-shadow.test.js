@@ -13,7 +13,21 @@ const {
 } = require('./router-shadow.js');
 
 const ROOT = path.resolve(__dirname, '..');
-const REAL_CLI = '/Users/sungmin/Dev/claude-plugins/deep-model-router/skills/model-router/scripts/route_task.py';
+function writeTempRouteTask() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-shadow-cli-'));
+  const cli = path.join(dir, 'route_task.py');
+  fs.writeFileSync(cli, '#!/usr/bin/env python3\n');
+  fs.chmodSync(cli, 0o755);
+  return cli;
+}
+
+function existingRouterCli() {
+  const sibling = '/Users/sungmin/Dev/claude-plugins/deep-model-router/skills/model-router/scripts/route_task.py';
+  for (const candidate of [process.env.DEEP_MODEL_ROUTER_CLI, sibling]) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 const CLI = path.join(__dirname, 'model-routing-cli.js');
 const SHADOW_CLI = path.join(__dirname, 'router-shadow.js');
 
@@ -45,14 +59,25 @@ function mockInvoke(outcome) {
   return () => outcome;
 }
 
-test('authority JSON is deepEqual to the input MR_OUT (live router)', () => {
-  assert.ok(fs.existsSync(REAL_CLI), 'P2a tests require the local router checkout');
+test('authority JSON is deepEqual to the input MR_OUT', () => {
   const { raw, parsed } = authorityFromCli();
   const original = JSON.parse(raw);
   const result = recordRouterShadow({
     mrOut: parsed,
     request: sampleRequest(),
-    env: { ...process.env, DEEP_MODEL_ROUTER_CLI: REAL_CLI },
+    invoke: mockInvoke({
+      exit: 0,
+      stdout: JSON.stringify({
+        route_schema_version: 1,
+        router_plugin_version: '1.0.0',
+        policy_sha256: 'a'.repeat(64),
+        selected_model: 'claude-sonnet-5',
+        selected_effort_native: 'high',
+        risk_band: 'MEDIUM',
+      }),
+      stderr: '',
+      processState: 'exited',
+    }),
   });
   assert.deepEqual(result.authority, original);
   assert.deepEqual(result.authority.model_routing, original.model_routing);
@@ -64,6 +89,23 @@ test('authority JSON is deepEqual to the input MR_OUT (live router)', () => {
   assert.ok('exit' in result.shadow);
 });
 
+test('live router clones authority when a local checkout exists', (t) => {
+  const cli = existingRouterCli();
+  if (!cli) {
+    t.skip('local deep-model-router checkout is not present');
+    return;
+  }
+  const { raw, parsed } = authorityFromCli();
+  const original = JSON.parse(raw);
+  const result = recordRouterShadow({
+    mrOut: parsed,
+    request: sampleRequest(),
+    env: { ...process.env, DEEP_MODEL_ROUTER_CLI: cli },
+  });
+  assert.deepEqual(result.authority, original);
+  assert.equal(typeof result.shadow.dispatch_authorized, 'boolean');
+});
+
 test('HIGH/CRITICAL router error does not rewrite model_routing', () => {
   const { parsed } = authorityFromCli(['--risk-class', 'critical']);
   const before = JSON.parse(JSON.stringify(parsed.model_routing));
@@ -72,7 +114,6 @@ test('HIGH/CRITICAL router error does not rewrite model_routing', () => {
     request: sampleRequest({
       complexity: 3, uncertainty: 3, blast_radius: 3, reversibility: 3,
     }),
-    env: { ...process.env, DEEP_MODEL_ROUTER_CLI: REAL_CLI },
     localRiskBand: 'CRITICAL',
     invoke: mockInvoke({
       exit: 5,
@@ -242,7 +283,7 @@ test('python3-unavailable is recorded as unavailable, authority intact', () => {
   const result = recordRouterShadow({
     mrOut,
     request: sampleRequest(),
-    env: { DEEP_MODEL_ROUTER_CLI: REAL_CLI, PYTHON3: '/definitely/missing/python3', PATH: '/empty' },
+    env: { DEEP_MODEL_ROUTER_CLI: writeTempRouteTask(), PATH: '/empty' },
     findPython3: () => null,
   });
   assert.deepEqual(result.authority.model_routing, { implement: 'opus' });
@@ -273,7 +314,7 @@ test('CLI prints shadow JSON and never a rewritten authority', () => {
     SHADOW_CLI, '--mr-out-file', mrFile, '--request-json', reqFile,
   ], {
     encoding: 'utf8',
-    env: { ...process.env, DEEP_MODEL_ROUTER_CLI: REAL_CLI },
+    env: { ...process.env, DEEP_MODEL_ROUTER_CLI: writeTempRouteTask() },
   });
   const wrap = JSON.parse(out);
   assert.deepEqual(wrap.authority.model_routing, mrOut.model_routing);

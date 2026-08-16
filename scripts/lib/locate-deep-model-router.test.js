@@ -34,8 +34,8 @@ test('DEEP_MODEL_ROUTER_CLI wins when it is an executable route_task.py', () => 
 
 test('DEEP_MODEL_ROUTER_CLI from the source checkout is accepted (dev/CI override)', () => {
   const home = tmpHome('dw-locate-src-');
-  const sourceCli = '/Users/sungmin/Dev/claude-plugins/deep-model-router/skills/model-router/scripts/route_task.py';
-  assert.ok(fs.existsSync(sourceCli), 'P2a tests require the local router checkout');
+  const sourceCli = writeRouteTask(path.join(home, 'claude-plugins', 'deep-model-router',
+    'skills', 'model-router', 'scripts', 'route_task.py'));
   const found = locateDeepModelRouter({
     env: { DEEP_MODEL_ROUTER_CLI: sourceCli },
     home,
