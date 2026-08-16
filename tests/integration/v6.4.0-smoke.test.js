@@ -211,8 +211,8 @@ describe('v6.4.0 integration — Health Engine command contracts', () => {
 });
 
 describe('release metadata', () => {
-  it('active release metadata is bumped to 7.1.5 with evergreen usage docs', () => {
-    const version = '7.1.5';
+  it('active release metadata is bumped to 7.2.0 with evergreen usage docs', () => {
+    const version = '7.2.0';
     const featureVersion = '6.9.0';
     const root = path.join(__dirname, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -227,13 +227,15 @@ describe('release metadata', () => {
     assert.equal(claudePlugin.version, version);
     assert.equal(codexPlugin.version, version);
 
-    // Current release (7.1.5) — strict recovery evidence closure.
+    // Current release (7.2.0) — suite model-router shadow comparison.
     const changelogCurrent = releaseSection(changelog, version);
     const changelogKoCurrent = releaseSection(changelogKo, version);
-    assert.match(changelogCurrent,/Strict recovery evidence now fails closed across rollback and retry transitions/);
-    assert.match(changelogKoCurrent,/Strict recovery evidence가 rollback·retry 전환에서 fail-closed로 동작합니다/);
-    assert.match(changelogCurrent,/Recovery and receipt contracts now preserve identity and ordering guarantees/);
-    assert.match(changelogKoCurrent,/Recovery·receipt 계약이 identity와 ordering 보장을 유지합니다/);
+    assert.match(changelogCurrent,/Model-router shadow comparison/);
+    assert.match(changelogKoCurrent,/Model-router 섀도 비교/);
+    assert.match(changelogCurrent,/Dispatch authority stays the existing CLI JSON/);
+    assert.match(changelogKoCurrent,/dispatch 권위는 기존 CLI JSON입니다/);
+    assert.match(releaseSection(changelog, '7.1.5'),/Strict recovery evidence now fails closed across rollback and retry transitions/);
+    assert.match(releaseSection(changelogKo, '7.1.5'),/Strict recovery evidence가 rollback·retry 전환에서 fail-closed로 동작합니다/);
     assert.match(releaseSection(changelog, '7.1.4'),/terminal reviewed no-go/);
     assert.match(releaseSection(changelogKo, '7.1.4'),/terminal no-go/);
     assert.match(releaseSection(changelog, '7.1.4'),/existing inline policy pipeline therefore remains authoritative/);
