@@ -27,14 +27,28 @@ function isRouteTask(filePath) {
   }
 }
 
-function resolveRouteTask(filePath) {
+function isForbiddenRelativeCheckout(p) {
+  return RELATIVE_SIBLING.test(normalize(p));
+}
+
+function isInstalledCacheRouteTask(filePath) {
+  const text = normalize(filePath);
+  return versionFromCachePath(text) !== null
+    && (text.includes('/.claude/plugins/cache/') || text.includes('/.codex/plugins/'));
+}
+
+function resolveRouteTask(filePath, { installedOnly = false } = {}) {
+  if (isForbiddenRelativeCheckout(filePath) || isPersonalSkillPath(filePath)) return null;
   if (!isRouteTask(filePath)) return null;
-  if (isPersonalSkillPath(filePath)) return null;
+  let resolved;
   try {
-    return fs.realpathSync(filePath);
+    resolved = fs.realpathSync(filePath);
   } catch {
     return null;
   }
+  if (isForbiddenRelativeCheckout(resolved) || isPersonalSkillPath(resolved)) return null;
+  if (installedOnly && !isInstalledCacheRouteTask(resolved)) return null;
+  return resolved;
 }
 
 function parseSemver(raw) {
@@ -98,15 +112,17 @@ function locateDeepModelRouter({ env, home, cwd } = {}) {
 
   const cli = e.DEEP_MODEL_ROUTER_CLI;
   if (cli) {
-    if (!RELATIVE_SIBLING.test(cli) && !isPersonalSkillPath(cli)) {
-      const hit = resolveRouteTask(path.isAbsolute(cli) ? cli : path.resolve(cwd || process.cwd(), cli));
-      if (hit) return hit;
-    }
+    const candidate = path.isAbsolute(cli) ? cli : path.resolve(cwd || process.cwd(), cli);
+    const hit = resolveRouteTask(candidate);
+    if (hit) return hit;
   }
 
   const root = e.DEEP_MODEL_ROUTER_ROOT;
   if (root) {
-    const hit = resolveRouteTask(path.join(root, 'skills', 'model-router', 'scripts', ROUTE_TASK));
+    const hit = resolveRouteTask(
+      path.join(root, 'skills', 'model-router', 'scripts', ROUTE_TASK),
+      { installedOnly: true },
+    );
     if (hit) return hit;
   }
 
@@ -118,22 +134,16 @@ function locateDeepModelRouter({ env, home, cwd } = {}) {
 function findPython3({ env, execFileSync } = {}) {
   const exec = execFileSync || require('node:child_process').execFileSync;
   const e = env || process.env;
-  const candidates = [];
-  if (e.PYTHON3) candidates.push(e.PYTHON3);
-  candidates.push('python3');
-  for (const bin of candidates) {
-    try {
-      exec(bin, ['-c', 'import sys'], {
-        encoding: 'utf8',
-        env: e,
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
-      return bin;
-    } catch {
-      /* try next */
-    }
+  try {
+    exec('python3', ['-c', 'import sys'], {
+      encoding: 'utf8',
+      env: e,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return 'python3';
+  } catch {
+    return null;
   }
-  return null;
 }
 
 module.exports = { locateDeepModelRouter, findPython3 };

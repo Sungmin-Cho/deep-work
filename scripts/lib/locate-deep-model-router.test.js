@@ -43,15 +43,43 @@ test('DEEP_MODEL_ROUTER_CLI from the source checkout is accepted (dev/CI overrid
   assert.equal(found, fs.realpathSync(sourceCli));
 });
 
-test('DEEP_MODEL_ROUTER_ROOT locates skills/model-router/scripts/route_task.py', () => {
+test('DEEP_MODEL_ROUTER_ROOT locates only an installed/cache plugin root', () => {
   const home = tmpHome('dw-locate-root-');
-  const root = path.join(home, 'plugin-root');
+  const root = path.join(home, '.claude', 'plugins', 'cache', 'mkt', 'deep-model-router', '1.2.0');
   const cli = writeRouteTask(path.join(root, 'skills', 'model-router', 'scripts', 'route_task.py'));
   const found = locateDeepModelRouter({
     env: { DEEP_MODEL_ROUTER_ROOT: root },
     home,
   });
   assert.equal(found, fs.realpathSync(cli));
+});
+
+test('DEEP_MODEL_ROUTER_ROOT rejects a source checkout and a relative sibling', () => {
+  const home = tmpHome('dw-locate-root-src-');
+  const sourceRoot = path.join(home, 'claude-plugins', 'deep-model-router');
+  writeRouteTask(path.join(sourceRoot, 'skills', 'model-router', 'scripts', 'route_task.py'));
+  assert.equal(locateDeepModelRouter({
+    env: { DEEP_MODEL_ROUTER_ROOT: sourceRoot },
+    home,
+  }), null);
+  assert.equal(locateDeepModelRouter({
+    env: { DEEP_MODEL_ROUTER_ROOT: '../deep-model-router' },
+    home,
+    cwd: home,
+  }), null);
+});
+
+test('DEEP_MODEL_ROUTER_ROOT rejects a personal skill tree even via symlink', () => {
+  const home = tmpHome('dw-locate-root-link-');
+  const personal = writeRouteTask(path.join(home, '.claude', 'skills', 'model-router',
+    'scripts', 'route_task.py'));
+  const root = path.join(home, 'alias-root');
+  fs.mkdirSync(path.join(root, 'skills', 'model-router', 'scripts'), { recursive: true });
+  fs.symlinkSync(personal, path.join(root, 'skills', 'model-router', 'scripts', 'route_task.py'));
+  assert.equal(locateDeepModelRouter({
+    env: { DEEP_MODEL_ROUTER_ROOT: root },
+    home,
+  }), null);
 });
 
 test('Claude cache hit prefers the highest semver directory', () => {
@@ -123,10 +151,10 @@ test('python3-unavailable: findPython3 returns the working binary', () => {
   const found = findPython3({
     env: { PYTHON3: '/opt/custom/python3' },
     execFileSync: (bin, args) => {
-      assert.equal(bin, '/opt/custom/python3');
+      assert.equal(bin, 'python3');
       assert.deepEqual(args, ['-c', 'import sys']);
       return '';
     },
   });
-  assert.equal(found, '/opt/custom/python3');
+  assert.equal(found, 'python3');
 });

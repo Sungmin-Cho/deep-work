@@ -151,7 +151,7 @@ function defaultInvoke({ python, cli, request, env, timeoutMs }) {
   const reqPath = path.join(dir, 'request.json');
   fs.writeFileSync(reqPath, JSON.stringify(request ?? {}));
   try {
-    const result = spawnSync(python, [cli, '--request-json', reqPath, '--format', 'json'], {
+    const result = spawnSync('python3', [cli, '--request-json', reqPath, '--format', 'json'], {
       encoding: 'utf8',
       timeout: timeoutMs || 15_000,
       env,
