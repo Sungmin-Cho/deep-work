@@ -133,16 +133,142 @@ function checkTddEnforcement(tddState, filePath, tddMode, exemptPatterns, tddOve
 // ─── Write-pattern building blocks (issue #75) ────────────────
 //
 // A redirect writes a file only when its target is a real path. `/dev/null`
-// discards output and `&1` duplicates a descriptor; neither creates anything,
-// so `ls > /dev/null` and `make check >/dev/null 2>&1` are read-only.
-const REDIRECT_TARGET = String.raw`\s*(?!/dev/null(?:\s|$)|&\d)\S+`;
+// discards output, `&1` duplicates a descriptor, and `=` means the `>` was
+// part of `>=`; none of them create anything, so `ls > /dev/null` and
+// `make check >/dev/null 2>&1` are read-only.
+//
+// The operator may carry a leading fd digit (`2> err.log` does write a file),
+// and needs no separator before it (`git diff>patch.diff` writes one too).
+// What it must not do is match an arrow: `->` and `=>` are excluded by the
+// lookbehind. Prose is handled upstream — `scanShellFragment` blanks quoted
+// literals before this pattern ever sees them, which is what lets the
+// separator requirement go without `git commit -m "a > b"` matching.
+const REDIRECT_WRITE = /(?<![-=<>])\d?>{1,2}\s*(?!\/dev\/null(?:\s|$)|&\d|=)\S+/;
 
-// `2>` names a file descriptor, so `cat f 2>/dev/null` is a read. The generic
-// entry below cannot match one because it demands a separator immediately
-// before the operator, and a digit is not a separator. The command-specific
-// entries need the rule spelled out: their `.*` used to swallow the fd digit,
-// which is what blocked `cat pkg.json 2>/dev/null | grep name`.
-const NOT_FD = String.raw`(?<![0-9])`;
+// Placeholder for a character the shell will not interpret. Non-whitespace on
+// purpose: a quoted redirect target (`> "my file.txt"`) must still look like a
+// target to `\S+`, while a quoted `>` must not look like an operator.
+const INERT_CHAR = '\u0001';
+
+// How deep to follow nested command substitutions before giving up.
+const MAX_SHELL_NESTING = 3;
+
+/**
+ * Walks a command fragment once, separating text the shell executes from text
+ * it merely carries as data.
+ *
+ * @param {string} fragment - one command fragment from splitCommands
+ * @returns {{ masked: string, liveSpans: string[] }}
+ *   masked    - same-length copy with every inert character replaced by
+ *               INERT_CHAR, so offsets still line up
+ *   liveSpans - contents the shell runs as commands in their own right:
+ *               command substitutions and `sh -c` payloads. They are blanked
+ *               in `masked` and handed back for analysis as commands.
+ */
+function scanShellFragment(fragment) {
+  const out = fragment.split('');
+  const liveSpans = [];
+  const frames = [];
+  let singleQuoted = false;
+  let doubleQuoted = false;
+  let quoteOpenAt = -1;
+  let i = 0;
+
+  const blank = (idx) => { out[idx] = INERT_CHAR; };
+
+  // A quoted span that directly follows `-c` is a shell payload, not data.
+  const closeQuote = (contentStart, contentEnd) => {
+    const before = fragment.slice(0, quoteOpenAt).trimEnd();
+    if (before.endsWith('-c')) liveSpans.push(fragment.slice(contentStart, contentEnd));
+    quoteOpenAt = -1;
+  };
+
+  while (i < fragment.length) {
+    const ch = fragment[i];
+    const inSubstitution = frames.length > 0;
+
+    // A backslash escapes the next character everywhere except single quotes.
+    if (ch === '\\' && !singleQuoted && i + 1 < fragment.length) {
+      if (singleQuoted || doubleQuoted || inSubstitution) { blank(i); blank(i + 1); }
+      i += 2;
+      continue;
+    }
+
+    if (singleQuoted) {
+      blank(i);
+      if (ch === "'") {
+        singleQuoted = false;
+        if (!inSubstitution) closeQuote(quoteOpenAt + 1, i);
+      }
+      i++;
+      continue;
+    }
+
+    // `$(` opens a substitution even inside double quotes — the shell runs it.
+    if (ch === '$' && fragment[i + 1] === '(') {
+      frames.push({ kind: 'paren', contentStart: i + 2, singleQuoted, doubleQuoted });
+      blank(i); blank(i + 1);
+      singleQuoted = false;
+      doubleQuoted = false;
+      i += 2;
+      continue;
+    }
+
+    if (ch === ')' && frames.length > 0 && frames[frames.length - 1].kind === 'paren') {
+      const frame = frames.pop();
+      blank(i);
+      if (frames.length === 0) liveSpans.push(fragment.slice(frame.contentStart, i));
+      singleQuoted = frame.singleQuoted;
+      doubleQuoted = frame.doubleQuoted;
+      i++;
+      continue;
+    }
+
+    if (ch === '`') {
+      const top = frames[frames.length - 1];
+      if (top && top.kind === 'tick') {
+        frames.pop();
+        blank(i);
+        if (frames.length === 0) liveSpans.push(fragment.slice(top.contentStart, i));
+        singleQuoted = top.singleQuoted;
+        doubleQuoted = top.doubleQuoted;
+      } else {
+        frames.push({ kind: 'tick', contentStart: i + 1, singleQuoted, doubleQuoted });
+        blank(i);
+        singleQuoted = false;
+        doubleQuoted = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === "'" && !doubleQuoted) {
+      singleQuoted = true;
+      if (!inSubstitution) quoteOpenAt = i;
+      blank(i);
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      blank(i);
+      if (doubleQuoted) {
+        doubleQuoted = false;
+        if (!inSubstitution) closeQuote(quoteOpenAt + 1, i);
+      } else {
+        doubleQuoted = true;
+        if (!inSubstitution) quoteOpenAt = i;
+      }
+      i++;
+      continue;
+    }
+
+    if (doubleQuoted || inSubstitution) blank(i);
+    i++;
+  }
+
+  return { masked: out.join(''), liveSpans };
+}
 
 // A command name only counts when it sits in command position: at the head of
 // a fragment (splitCommands has already cut on | ; && ||), after env
@@ -162,12 +288,12 @@ const cmd = (body) => new RegExp(CMD_HEAD + body);
  * Each pattern has a regex and a description.
  */
 const FILE_WRITE_PATTERNS = [
-  // Redirects are deliberately NOT command-anchored: the operator is what
-  // writes, wherever it appears — including inside `bash -c "echo x > f"`.
-  { pattern: new RegExp(String.raw`(?:^|[|;&]|\s)>{1,2}${REDIRECT_TARGET}`), desc: 'output redirection (> or >>)' },
-  { pattern: new RegExp(String.raw`\bcat\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'cat with redirect' },
-  { pattern: new RegExp(String.raw`\becho\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'echo with redirect' },
-  { pattern: new RegExp(String.raw`\bprintf\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'printf with redirect' },
+  // Redirects are NOT in this list: they are matched by detectRedirectWrite
+  // against the quote-masked fragment, because the operator is a character the
+  // shell interprets rather than a command name, and prose is full of `>`.
+  // The per-command `cat`/`echo`/`printf` redirect entries are gone with them —
+  // they existed only to catch the no-space form, which the generic redirect
+  // pattern now handles for every command.
   { pattern: cmd(String.raw`tee\s+(?:-a\s+)?\S+`), desc: 'tee command' },
   { pattern: cmd(String.raw`sed\s+-i`), desc: 'sed in-place edit' },
   { pattern: cmd(String.raw`cp\s+`), desc: 'cp (file copy)' },
@@ -478,6 +604,39 @@ function splitCommands(command) {
  * @param {string} command - The bash command string
  * @returns {{ isFileWrite: boolean, pattern?: string }}
  */
+/**
+ * Decides whether one command fragment writes a file, following the spans the
+ * shell actually executes.
+ *
+ * Redirects are matched against the quote-masked fragment so that `>` inside a
+ * commit message or issue body is inert. Command-name patterns keep matching
+ * the raw fragment, because several of them deliberately inspect a quoted
+ * argument — `node -e "…writeFileSync…"` would vanish under masking.
+ *
+ * @param {string} fragment - a single command fragment
+ * @param {number} depth - current substitution nesting level
+ * @returns {string|null} the matched pattern description, or null
+ */
+function matchFileWrite(fragment, depth) {
+  const { masked, liveSpans } = scanShellFragment(fragment);
+
+  if (REDIRECT_WRITE.test(masked)) return 'output redirection (> or >>)';
+
+  for (const { pattern, desc } of FILE_WRITE_PATTERNS) {
+    if (pattern.test(fragment)) return desc;
+  }
+
+  if (depth >= MAX_SHELL_NESTING) return null;
+  for (const span of liveSpans) {
+    for (const inner of splitCommands(span)) {
+      const nested = matchFileWrite(inner, depth + 1);
+      if (nested) return nested;
+    }
+  }
+
+  return null;
+}
+
 function detectBashFileWrite(command) {
   if (!command || typeof command !== 'string') {
     return { isFileWrite: false };
@@ -487,13 +646,7 @@ function detectBashFileWrite(command) {
 
   for (const sub of subCommands) {
     // Check file-write patterns FIRST (security-critical)
-    let writeMatch = null;
-    for (const { pattern, desc } of FILE_WRITE_PATTERNS) {
-      if (pattern.test(sub)) {
-        writeMatch = desc;
-        break;
-      }
-    }
+    let writeMatch = matchFileWrite(sub, 0);
 
     // If file-write detected, return immediately (safe patterns cannot override)
     if (writeMatch) {

@@ -7,6 +7,13 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [7.2.2] — 2026-08-18 (따옴표 인식 리다이렉트 판정)
+
+### Fixed
+
+- **`phase-guard`가 리다이렉트 문자를 양방향 모두 오판하지 않는다.** v7.2.1은 이슈 [#75](https://github.com/Sungmin-Cho/claude-deep-work/issues/75)가 나열한 사례를 닫았지만, 전제 하나가 두 가지 일을 겸하고 있었다 — 산문의 `->`가 매칭되지 않도록 `>` 앞에 구분자를 요구했고, 그 조건이 동시에 공백 없는 리다이렉트를 전부 놓치게 하면서 커밋 메시지 안의 `>=`는 여전히 쓰기로 읽었다. 이제 리다이렉트는 따옴표가 마스킹된 사본을 대상으로 매칭하므로 셸이 데이터로만 넘기는 텍스트는 아예 매칭될 수 없고, 산문이 구조적으로 처리되면서 구분자 요구는 제거됐다. 이 변경을 촉발한 19개 명령으로 측정: 놓치는 쓰기 8/12 → 0/12 (`git diff>patch.diff`, `cmd 2> err.log`, `make 2>build-errors.txt`가 이제 잡힌다), 오탐 3/7 → 0/7 (`git commit -m "require node >= 22"`, `echo "map: x => y"`가 이제 통과한다).
+- **셸이 실제로 실행하는 구간은 살아 있다.** `scanShellFragment`가 각 fragment를 한 번 훑으며 따옴표 리터럴을 지우되, 명령 치환과 `sh -c` 페이로드는 그 자체로 명령으로 남겨 깊이 제한 하에 재귀 분석한다. `bash -c "echo x > f"`와 `echo "$(cat x > f)"`는 계속 차단되고, 작은따옴표라 리터럴인 `echo '$(cat x > f)'`는 차단되지 않는다. 명령어 패턴은 원본 fragment를 계속 대상으로 삼아 `node -e "…writeFileSync…"`가 영향받지 않는다. 중복이 된 `cat`/`echo`/`printf` 전용 리다이렉트 항목은 제거했다. 커버리지는 `hooks/scripts/phase-guard-redirect-detection.test.js`에 있다.
+
 ## [7.2.1] — 2026-08-18 (훅 캐시 및 가드 오탐 수정)
 
 ### Fixed

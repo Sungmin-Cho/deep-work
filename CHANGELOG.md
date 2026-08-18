@@ -7,6 +7,13 @@ All notable changes to the Deep Work plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.2] — 2026-08-18 (Quote-Aware Redirect Detection)
+
+### Fixed
+
+- **`phase-guard` no longer misreads redirect characters, in either direction.** v7.2.1 closed the cases issue [#75](https://github.com/Sungmin-Cho/claude-deep-work/issues/75) listed but left one precondition doing two jobs: the redirect pattern demanded a separator before `>` so that `->` in prose would not match, which also made every no-space redirect invisible and still let `>=` inside a commit message read as a write. Redirects are now matched against a quote-masked copy of the fragment, so text the shell only carries as data cannot match at all — and with prose handled structurally, the separator requirement is gone. Measured on the 19 commands that motivated the change: missed writes went 8/12 → 0/12 (`git diff>patch.diff`, `cmd 2> err.log`, `make 2>build-errors.txt` are now caught) and false positives 3/7 → 0/7 (`git commit -m "require node >= 22"`, `echo "map: x => y"` now pass).
+- **Spans the shell really executes stay live.** `scanShellFragment` walks each fragment once, blanking quoted literals while keeping command substitutions and `sh -c` payloads as commands in their own right, analysed recursively to a bounded depth. `bash -c "echo x > f"` and `echo "$(cat x > f)"` stay blocked; `echo '$(cat x > f)'`, single-quoted and therefore literal, does not. Command-name patterns keep matching the raw fragment so that `node -e "…writeFileSync…"` is unaffected. The per-command `cat`/`echo`/`printf` redirect entries were removed as redundant. Coverage lives in `hooks/scripts/phase-guard-redirect-detection.test.js`.
+
 ## [7.2.1] — 2026-08-18 (Hook Cache & Guard False-Positive Fixes)
 
 ### Fixed

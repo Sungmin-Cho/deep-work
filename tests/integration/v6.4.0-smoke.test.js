@@ -211,8 +211,8 @@ describe('v6.4.0 integration — Health Engine command contracts', () => {
 });
 
 describe('release metadata', () => {
-  it('active release metadata is bumped to 7.2.1 with evergreen usage docs', () => {
-    const version = '7.2.1';
+  it('active release metadata is bumped to 7.2.2 with evergreen usage docs', () => {
+    const version = '7.2.2';
     const featureVersion = '6.9.0';
     const root = path.join(__dirname, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -227,17 +227,29 @@ describe('release metadata', () => {
     assert.equal(claudePlugin.version, version);
     assert.equal(codexPlugin.version, version);
 
-    // Current release (7.2.1) — hook cache lifecycle and guard false positives.
+    // Current release (7.2.2) — quote-aware redirect detection.
     const changelogCurrent = releaseSection(changelog, version);
     const changelogKoCurrent = releaseSection(changelogKo, version);
-    assert.match(changelogCurrent,/PostToolUse handoff cache no longer leaves one file per tool call/);
-    assert.match(changelogKoCurrent,/PostToolUse 핸드오프 캐시가 툴 호출마다 파일을 남기지 않는다/);
-    assert.match(changelogCurrent,/no longer blocks read-only Bash outside the Implement phase/);
-    assert.match(changelogKoCurrent,/Implement 외 단계에서 읽기 전용 Bash를 막지 않는다/);
-    assert.ok(changelogCurrent.includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
-      'CHANGELOG.md 7.2.1 section must cite the cache-lifecycle regression test');
-    assert.ok(changelogKoCurrent.includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
-      'CHANGELOG.ko.md 7.2.1 section must cite the cache-lifecycle regression test');
+    assert.match(changelogCurrent,/no longer misreads redirect characters, in either direction/);
+    assert.match(changelogKoCurrent,/리다이렉트 문자를 양방향 모두 오판하지 않는다/);
+    assert.match(changelogCurrent,/Spans the shell really executes stay live/);
+    assert.match(changelogKoCurrent,/셸이 실제로 실행하는 구간은 살아 있다/);
+    assert.ok(changelogCurrent.includes('hooks/scripts/phase-guard-redirect-detection.test.js'),
+      'CHANGELOG.md 7.2.2 section must cite the redirect-detection regression test');
+    assert.ok(changelogKoCurrent.includes('hooks/scripts/phase-guard-redirect-detection.test.js'),
+      'CHANGELOG.ko.md 7.2.2 section must cite the redirect-detection regression test');
+    // The prior release (7.2.1) keeps its own hook-cache headline; this patch
+    // release must not absorb it.
+    assert.match(releaseSection(changelog, '7.2.1'),/PostToolUse handoff cache no longer leaves one file per tool call/);
+    assert.match(releaseSection(changelogKo, '7.2.1'),/PostToolUse 핸드오프 캐시가 툴 호출마다 파일을 남기지 않는다/);
+    assert.ok(releaseSection(changelog, '7.2.1').includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
+      'CHANGELOG.md 7.2.1 section must retain the cache-lifecycle regression test');
+    assert.ok(releaseSection(changelogKo, '7.2.1').includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
+      'CHANGELOG.ko.md 7.2.1 section must retain the cache-lifecycle regression test');
+    assert.equal(changelogCurrent.includes('PostToolUse handoff cache'), false,
+      'CHANGELOG.md 7.2.2 section must not absorb the 7.2.1 hook-cache note');
+    assert.equal(changelogKoCurrent.includes('PostToolUse 핸드오프 캐시'), false,
+      'CHANGELOG.ko.md 7.2.2 section must not absorb the 7.2.1 hook-cache note');
     // The prior release (7.2.0) keeps its own model-router shadow headline; this
     // patch release must not absorb it.
     assert.match(releaseSection(changelog, '7.2.0'),/Model-router shadow comparison/);
