@@ -7,6 +7,13 @@ All notable changes to the Deep Work plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.2.1] — 2026-08-18 (Hook Cache & Guard False-Positive Fixes)
+
+### Fixed
+
+- **The PostToolUse handoff cache no longer leaves one file per tool call** ([#74](https://github.com/Sungmin-Cho/claude-deep-work/issues/74)). `phase-transition.sh` deletes `.claude/.hook-tool-input.<PPID>` unconditionally, ahead of its early exits. The delete cannot be conditional on having read the cache: `hook-shell-adapter.js` hands the payload over in `CLAUDE_TOOL_INPUT`, so on the production path the fallback branch never runs and nothing consumed the file `file-tracker.sh` had just written. `$PPID` stays as the key so concurrent invocations in one session cannot read each other's payload. `session-end.sh` drops its unreachable `$PPID` removal and keeps the 60-minute sweep as a crash backstop. Regression coverage lives in `hooks/scripts/hook-input-cache-lifecycle.test.js`.
+- **`phase-guard` no longer blocks read-only Bash outside the Implement phase** ([#75](https://github.com/Sungmin-Cho/claude-deep-work/issues/75)). `FILE_WRITE_PATTERNS` now ignores fd-numbered redirects (`cat f 2>/dev/null`), `/dev/null` and fd-duplication targets (`ls > /dev/null`, `2>&1`), and command names that appear inside quoted prose (`git commit -m "patch the bug"`). Command-name patterns match only in command position — fragment head, after an env or privilege prefix, or inside a `sh -c` payload — so `bash -c "mv a b"` stays blocked. Package-manager installs keep their previous handling through an explicit pattern. The both-streams redirect `node app.js &> build.log` is now correctly detected as a write. The issue's own 12-case matrix is pinned in `hooks/scripts/phase-guard-core.test.js`.
+
 ## [7.2.0] — 2026-08-17 (Suite Model-Router Shadow)
 
 ### Added

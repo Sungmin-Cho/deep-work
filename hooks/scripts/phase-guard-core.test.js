@@ -868,3 +868,97 @@ describe('artifacts-only fork phase restriction', () => {
     assert.equal(result.decision, 'allow');
   });
 });
+
+// ─── FILE_WRITE_PATTERNS false positives / negatives (issue #75) ──────────
+//
+// The guard blocked ordinary read-only Bash during non-implement phases.
+// SAFE_COMMAND_PATTERNS cannot rescue these: detectBashFileWrite checks the
+// write patterns first and returns immediately.
+
+describe('detectBashFileWrite — fd-numbered redirects are not file writes (issue #75.1)', () => {
+  it('allows a stderr redirect to /dev/null on cat', () => {
+    assert.equal(detectBashFileWrite('cat pkg.json 2>/dev/null | grep name').isFileWrite, false);
+  });
+
+  it('allows a stderr redirect inside command substitution on echo', () => {
+    assert.equal(detectBashFileWrite('echo "n=$(ls a* 2>/dev/null | wc -l)"').isFileWrite, false);
+  });
+
+  it('allows a stderr redirect on printf', () => {
+    assert.equal(detectBashFileWrite('printf "%s" "$x" 2>/dev/null').isFileWrite, false);
+  });
+
+  it('allows an fd duplication', () => {
+    assert.equal(detectBashFileWrite('ls -la 2>&1 | head').isFileWrite, false);
+  });
+});
+
+describe('detectBashFileWrite — /dev/null is not a file write (issue #75.2)', () => {
+  it('allows discarding stdout to /dev/null', () => {
+    assert.equal(detectBashFileWrite('ls > /dev/null').isFileWrite, false);
+  });
+
+  it('allows discarding both streams to /dev/null', () => {
+    assert.equal(detectBashFileWrite('make check >/dev/null 2>&1').isFileWrite, false);
+  });
+});
+
+describe('detectBashFileWrite — command tokens in prose are not commands (issue #75.3)', () => {
+  it('allows an issue body that mentions mv in English prose', () => {
+    assert.equal(
+      detectBashFileWrite('gh issue create --body "atomic temp write then mv on L63-67"').isFileWrite,
+      false,
+    );
+  });
+
+  it('allows a commit message containing the word patch', () => {
+    assert.equal(detectBashFileWrite('git commit -m "patch the bug"').isFileWrite, false);
+  });
+
+  it('allows a commit message containing the word install', () => {
+    assert.equal(detectBashFileWrite('git commit -m "install the plugin first"').isFileWrite, false);
+  });
+
+  it('still blocks mv in command position', () => {
+    assert.equal(detectBashFileWrite('mv a.txt b.txt').isFileWrite, true);
+  });
+
+  it('still blocks mv after a privilege prefix', () => {
+    assert.equal(detectBashFileWrite('sudo mv a.txt b.txt').isFileWrite, true);
+  });
+
+  it('still blocks mv in a shell-wrapper payload', () => {
+    assert.equal(detectBashFileWrite('bash -c "mv a.txt b.txt"').isFileWrite, true);
+  });
+
+  it('still blocks cp after a chained safe command', () => {
+    assert.equal(detectBashFileWrite('npm test && cp a.txt b.txt').isFileWrite, true);
+  });
+});
+
+describe('detectBashFileWrite — ampersand redirect is a file write (issue #75.4)', () => {
+  it('blocks the both-streams redirect form', () => {
+    assert.equal(detectBashFileWrite('node app.js &> build.log').isFileWrite, true);
+  });
+
+  it('blocks the both-streams append form', () => {
+    assert.equal(detectBashFileWrite('node app.js &>> build.log').isFileWrite, true);
+  });
+});
+
+describe('detectBashFileWrite — real writes stay blocked (issue #75 regression guard)', () => {
+  const blocked = [
+    'echo hi > out.txt',
+    'echo hi>out.txt',
+    'echo hi >> out.txt',
+    'cat a.txt > b.txt',
+    'printf x > f',
+    'tee out.txt',
+    "sed -i 's/a/b/' f.txt",
+  ];
+  for (const cmd of blocked) {
+    it(`blocks: ${cmd}`, () => {
+      assert.equal(detectBashFileWrite(cmd).isFileWrite, true);
+    });
+  }
+});

@@ -22,10 +22,19 @@ init_deep_work_state
 # $PPID 키로 캐시해 두고, 우리가 그 캐시 파일을 읽는다. 환경변수도
 # 혹시 미래 버전에서 설정될 가능성을 고려해 우선 확인한다.
 TOOL_INPUT="${CLAUDE_TOOL_USE_INPUT:-${CLAUDE_TOOL_INPUT:-}}"
-if [[ -z "$TOOL_INPUT" ]]; then
-  _HOOK_INPUT_CACHE="$PROJECT_ROOT/.claude/.hook-tool-input.${PPID}"
-  [[ -f "$_HOOK_INPUT_CACHE" ]] && TOOL_INPUT="$(cat "$_HOOK_INPUT_CACHE" 2>/dev/null || printf '')"
+_HOOK_INPUT_CACHE="$PROJECT_ROOT/.claude/.hook-tool-input.${PPID}"
+if [[ -z "$TOOL_INPUT" && -f "$_HOOK_INPUT_CACHE" ]]; then
+  TOOL_INPUT="$(cat "$_HOOK_INPUT_CACHE" 2>/dev/null || printf '')"
 fi
+# v7.2.1 (issue #74): we are the cache's only consumer, so the handoff is over
+# the moment the read above has had its chance — drop the file here, ahead of
+# every early exit below. This must NOT be conditional on having read it:
+# hook-shell-adapter.js passes the payload in CLAUDE_TOOL_INPUT, so on the
+# production path the branch above never runs and nothing else would ever
+# remove what file-tracker.sh just wrote. That is why the files piled up one
+# per tool call. $PPID stays as the key so two hook invocations racing inside
+# one session cannot read each other's payload.
+rm -f "$_HOOK_INPUT_CACHE" 2>/dev/null || true
 [[ -z "$TOOL_INPUT" ]] && exit 0
 
 # v6.9.4 (deep-review D-2): env 미설정(wrapper) 하네스 방어 — 받은 입력이

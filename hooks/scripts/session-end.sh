@@ -421,9 +421,11 @@ append_session_history() {
 (append_session_history) 2>>"$PROJECT_ROOT/.claude/deep-work-guard-errors.log" || true
 
 # v6.2.4 post-review: cleanup stale PostToolUse stdin-cache files.
-# Remove our own PPID cache (no longer needed after session close) and any
-# orphaned .hook-tool-input.* files older than 60 minutes. Best-effort.
-rm -f "$PROJECT_ROOT/.claude/.hook-tool-input.$PPID" 2>/dev/null
+# v7.2.1 (issue #74): phase-transition.sh now deletes each cache as soon as the
+# handoff is done, so this sweep is only a backstop for invocations that died
+# between the write and the read. The former `rm -f …$PPID` line was dropped:
+# $PPID here is this Stop hook's own node bootstrap, never the PostToolUse one
+# that created a cache, so it could not match a real file. Best-effort.
 find "$PROJECT_ROOT/.claude" -maxdepth 1 -name '.hook-tool-input.*' -type f -mmin +60 -delete 2>/dev/null || true
 
 # v5.4: Update last_activity on CLI stop (do NOT unregister)
