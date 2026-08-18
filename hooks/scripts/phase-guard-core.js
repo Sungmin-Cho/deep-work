@@ -130,40 +130,73 @@ function checkTddEnforcement(tddState, filePath, tddMode, exemptPatterns, tddOve
 
 // ─── Bash Command Detection ──────────────────────────────────
 
+// ─── Write-pattern building blocks (issue #75) ────────────────
+//
+// A redirect writes a file only when its target is a real path. `/dev/null`
+// discards output and `&1` duplicates a descriptor; neither creates anything,
+// so `ls > /dev/null` and `make check >/dev/null 2>&1` are read-only.
+const REDIRECT_TARGET = String.raw`\s*(?!/dev/null(?:\s|$)|&\d)\S+`;
+
+// `2>` names a file descriptor, so `cat f 2>/dev/null` is a read. The generic
+// entry below cannot match one because it demands a separator immediately
+// before the operator, and a digit is not a separator. The command-specific
+// entries need the rule spelled out: their `.*` used to swallow the fd digit,
+// which is what blocked `cat pkg.json 2>/dev/null | grep name`.
+const NOT_FD = String.raw`(?<![0-9])`;
+
+// A command name only counts when it sits in command position: at the head of
+// a fragment (splitCommands has already cut on | ; && ||), after env
+// assignments or a privilege/timing prefix, or at the head of a shell-wrapper
+// payload (`sh -c "…"`). Without this anchor a bare `\bmv\s+` matches English
+// prose inside a quoted argument — `gh issue create --body "…then mv on
+// L63-67"` was blocked as a file move, and `git commit -m "patch the bug"` as
+// a patch. The repetition is bounded to keep the alternation from backtracking
+// pathologically on hostile input.
+const CMD_HEAD = String.raw`(?:^|-c\s*["']?)\s*(?:(?:[\w.]+=\S*|sudo|command|time|timeout|env|nohup|exec|xargs|\d+[a-z]?)\s+){0,6}`;
+
+/** Builds a command-position-anchored write pattern. */
+const cmd = (body) => new RegExp(CMD_HEAD + body);
+
 /**
  * File-writing shell patterns that bypass Write/Edit tools.
  * Each pattern has a regex and a description.
  */
 const FILE_WRITE_PATTERNS = [
-  { pattern: /(?:^|[|;]|\s)(?:>{1,2})\s*\S+/, desc: 'output redirection (> or >>)' },
-  { pattern: /\btee\s+(?:-a\s+)?\S+/, desc: 'tee command' },
-  { pattern: /\bsed\s+-i/, desc: 'sed in-place edit' },
-  { pattern: /\bcp\s+/, desc: 'cp (file copy)' },
-  { pattern: /\bmv\s+/, desc: 'mv (file move)' },
-  { pattern: /\binstall\s+-/, desc: 'install command' },
-  { pattern: /\bdd\s+.*of=/, desc: 'dd with output file' },
-  { pattern: /\bcat\s+.*>\s*\S+/, desc: 'cat with redirect' },
-  { pattern: /\becho\s+.*>\s*\S+/, desc: 'echo with redirect' },
-  { pattern: /\bprintf\s+.*>\s*\S+/, desc: 'printf with redirect' },
-  { pattern: /\bpatch\s+/, desc: 'patch command' },
-  { pattern: /\bchmod\s+/, desc: 'chmod (permission change)' },
-  { pattern: /\bchown\s+/, desc: 'chown (ownership change)' },
-  { pattern: /\bperl\s+.*-[^\s]*i/, desc: 'perl in-place edit' },
-  { pattern: /\bnode\s+-e\s+.*(?:writeFile|appendFile|createWriteStream|fs\.)/, desc: 'node -e file system write' },
-  { pattern: /\bawk\s+.*-i\s+inplace\b/, desc: 'awk in-place edit' },
-  { pattern: /\bpython[23]?\s+-c\s+.*(?:open\s*\(|write|\.dump)/, desc: 'python -c file write' },
-  { pattern: /\bruby\s+-e\s+.*(?:File\.|IO\.|open\s*\()/, desc: 'ruby -e file write' },
-  { pattern: /\bswift\s+-e\s+.*(?:write|FileManager|contentsOf)/, desc: 'swift -e file write' },
-  { pattern: /\btruncate\s+/, desc: 'truncate command' },
-  { pattern: /\bsponge\s+/, desc: 'sponge (moreutils) write' },
-  { pattern: /\bgit\s+(push|reset\s+--hard|checkout\s+--\s|clean\s+-f)/, desc: 'destructive git operation' },
-  { pattern: /\bcurl\s+.*-[^\s]*o\s/, desc: 'curl output to file' },
-  { pattern: /\bwget\s+.*-[^\s]*O\s/, desc: 'wget output to file' },
-  { pattern: /\bln\s+(?:-[^\s]*\s+)*\S+\s+\S+/, desc: 'ln (link creation)' },
-  { pattern: /\btar\s+.*x/, desc: 'tar extract (file creation)' },
-  { pattern: /\bunzip\s+/, desc: 'unzip (file extraction)' },
-  { pattern: /\bcpio\s+/, desc: 'cpio archive extraction' },
-  { pattern: /\brsync\s+/, desc: 'rsync (file sync)' },
+  // Redirects are deliberately NOT command-anchored: the operator is what
+  // writes, wherever it appears — including inside `bash -c "echo x > f"`.
+  { pattern: new RegExp(String.raw`(?:^|[|;&]|\s)>{1,2}${REDIRECT_TARGET}`), desc: 'output redirection (> or >>)' },
+  { pattern: new RegExp(String.raw`\bcat\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'cat with redirect' },
+  { pattern: new RegExp(String.raw`\becho\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'echo with redirect' },
+  { pattern: new RegExp(String.raw`\bprintf\s+[^|;]*${NOT_FD}>{1,2}${REDIRECT_TARGET}`), desc: 'printf with redirect' },
+  { pattern: cmd(String.raw`tee\s+(?:-a\s+)?\S+`), desc: 'tee command' },
+  { pattern: cmd(String.raw`sed\s+-i`), desc: 'sed in-place edit' },
+  { pattern: cmd(String.raw`cp\s+`), desc: 'cp (file copy)' },
+  { pattern: cmd(String.raw`mv\s+`), desc: 'mv (file move)' },
+  { pattern: cmd(String.raw`install\s+-`), desc: 'install command' },
+  // `\binstall\s+-` used to catch package-manager installs as a side effect of
+  // matching anywhere. Command-anchoring would silently unblock them, which is
+  // outside what issue #75 asked for, so state them explicitly instead.
+  { pattern: cmd(String.raw`(?:npm|yarn|pnpm|bun)\s+(?:install|add)\b`), desc: 'package manager install' },
+  { pattern: cmd(String.raw`dd\s+.*of=`), desc: 'dd with output file' },
+  { pattern: cmd(String.raw`patch\s+`), desc: 'patch command' },
+  { pattern: cmd(String.raw`chmod\s+`), desc: 'chmod (permission change)' },
+  { pattern: cmd(String.raw`chown\s+`), desc: 'chown (ownership change)' },
+  { pattern: cmd(String.raw`perl\s+.*-[^\s]*i`), desc: 'perl in-place edit' },
+  { pattern: cmd(String.raw`node\s+-e\s+.*(?:writeFile|appendFile|createWriteStream|fs\.)`), desc: 'node -e file system write' },
+  { pattern: cmd(String.raw`awk\s+.*-i\s+inplace\b`), desc: 'awk in-place edit' },
+  { pattern: cmd(String.raw`python[23]?\s+-c\s+.*(?:open\s*\(|write|\.dump)`), desc: 'python -c file write' },
+  { pattern: cmd(String.raw`ruby\s+-e\s+.*(?:File\.|IO\.|open\s*\()`), desc: 'ruby -e file write' },
+  { pattern: cmd(String.raw`swift\s+-e\s+.*(?:write|FileManager|contentsOf)`), desc: 'swift -e file write' },
+  { pattern: cmd(String.raw`truncate\s+`), desc: 'truncate command' },
+  { pattern: cmd(String.raw`sponge\s+`), desc: 'sponge (moreutils) write' },
+  { pattern: cmd(String.raw`git\s+(push|reset\s+--hard|checkout\s+--\s|clean\s+-f)`), desc: 'destructive git operation' },
+  { pattern: cmd(String.raw`curl\s+.*-[^\s]*o\s`), desc: 'curl output to file' },
+  { pattern: cmd(String.raw`wget\s+.*-[^\s]*O\s`), desc: 'wget output to file' },
+  { pattern: cmd(String.raw`ln\s+(?:-[^\s]*\s+)*\S+\s+\S+`), desc: 'ln (link creation)' },
+  { pattern: cmd(String.raw`tar\s+.*x`), desc: 'tar extract (file creation)' },
+  { pattern: cmd(String.raw`unzip\s+`), desc: 'unzip (file extraction)' },
+  { pattern: cmd(String.raw`cpio\s+`), desc: 'cpio archive extraction' },
+  { pattern: cmd(String.raw`rsync\s+`), desc: 'rsync (file sync)' },
   { pattern: /\bwriteFile\b/, desc: 'Node.js writeFile API call' },
 ];
 

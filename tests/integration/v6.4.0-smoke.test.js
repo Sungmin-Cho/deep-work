@@ -211,8 +211,8 @@ describe('v6.4.0 integration — Health Engine command contracts', () => {
 });
 
 describe('release metadata', () => {
-  it('active release metadata is bumped to 7.2.0 with evergreen usage docs', () => {
-    const version = '7.2.0';
+  it('active release metadata is bumped to 7.2.1 with evergreen usage docs', () => {
+    const version = '7.2.1';
     const featureVersion = '6.9.0';
     const root = path.join(__dirname, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -227,13 +227,27 @@ describe('release metadata', () => {
     assert.equal(claudePlugin.version, version);
     assert.equal(codexPlugin.version, version);
 
-    // Current release (7.2.0) — suite model-router shadow comparison.
+    // Current release (7.2.1) — hook cache lifecycle and guard false positives.
     const changelogCurrent = releaseSection(changelog, version);
     const changelogKoCurrent = releaseSection(changelogKo, version);
-    assert.match(changelogCurrent,/Model-router shadow comparison/);
-    assert.match(changelogKoCurrent,/Model-router 섀도 비교/);
-    assert.match(changelogCurrent,/Dispatch authority stays the existing CLI JSON/);
-    assert.match(changelogKoCurrent,/dispatch 권위는 기존 CLI JSON입니다/);
+    assert.match(changelogCurrent,/PostToolUse handoff cache no longer leaves one file per tool call/);
+    assert.match(changelogKoCurrent,/PostToolUse 핸드오프 캐시가 툴 호출마다 파일을 남기지 않는다/);
+    assert.match(changelogCurrent,/no longer blocks read-only Bash outside the Implement phase/);
+    assert.match(changelogKoCurrent,/Implement 외 단계에서 읽기 전용 Bash를 막지 않는다/);
+    assert.ok(changelogCurrent.includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
+      'CHANGELOG.md 7.2.1 section must cite the cache-lifecycle regression test');
+    assert.ok(changelogKoCurrent.includes('hooks/scripts/hook-input-cache-lifecycle.test.js'),
+      'CHANGELOG.ko.md 7.2.1 section must cite the cache-lifecycle regression test');
+    // The prior release (7.2.0) keeps its own model-router shadow headline; this
+    // patch release must not absorb it.
+    assert.match(releaseSection(changelog, '7.2.0'),/Model-router shadow comparison/);
+    assert.match(releaseSection(changelogKo, '7.2.0'),/Model-router 섀도 비교/);
+    assert.match(releaseSection(changelog, '7.2.0'),/Dispatch authority stays the existing CLI JSON/);
+    assert.match(releaseSection(changelogKo, '7.2.0'),/dispatch 권위는 기존 CLI JSON입니다/);
+    assert.equal(changelogCurrent.includes('Model-router shadow comparison'), false,
+      'CHANGELOG.md 7.2.1 section must not absorb the 7.2.0 model-router note');
+    assert.equal(changelogKoCurrent.includes('Model-router 섀도 비교'), false,
+      'CHANGELOG.ko.md 7.2.1 section must not absorb the 7.2.0 model-router note');
     assert.match(releaseSection(changelog, '7.1.5'),/Strict recovery evidence now fails closed across rollback and retry transitions/);
     assert.match(releaseSection(changelogKo, '7.1.5'),/Strict recovery evidence가 rollback·retry 전환에서 fail-closed로 동작합니다/);
     assert.match(releaseSection(changelog, '7.1.4'),/terminal reviewed no-go/);
