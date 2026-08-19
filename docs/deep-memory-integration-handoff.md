@@ -4,7 +4,7 @@
 >
 > **Source spec**: `deep-memory/docs/superpowers/specs/2026-05-20-deep-memory-design.md` §14.2 (the deep-memory-side spec lists the 6 deep-work consumer items). This document mirrors that list and adds implementation detail.
 >
-> **Sibling plugin**: deep-memory v0.1.0 — https://github.com/Sungmin-Cho/claude-deep-memory · marketplace entry already published in claude-deep-suite (commit `68ff717`).
+> **Sibling plugin**: deep-memory v0.1.0 — https://github.com/Sungmin-Cho/deep-memory · marketplace entry already published in deep-suite (commit `68ff717`).
 
 ---
 
@@ -165,7 +165,7 @@ The deep-work session/slice receipt envelopes (M3) are untouched by this PR. The
 
 ### 6.4 Cross-repo coupling
 
-Everything in this PR is **local to the deep-work repo**. No `claude-deep-suite/` marketplace bump, no `claude-deep-memory/` PR. The deep-memory marketplace entry was published independently (commit `68ff717`).
+Everything in this PR is **local to the deep-work repo**. No `deep-suite/` marketplace bump, no `deep-memory/` PR. The deep-memory marketplace entry was published independently (commit `68ff717`).
 
 ---
 

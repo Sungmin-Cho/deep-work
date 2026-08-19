@@ -2,9 +2,9 @@
 
 # deep-work
 
-[![version](https://img.shields.io/github/package-json/v/Sungmin-Cho/claude-deep-work?label=version)](https://github.com/Sungmin-Cho/claude-deep-work)
-[![license](https://img.shields.io/github/license/Sungmin-Cho/claude-deep-work)](./LICENSE)
-[![part of deep-suite](https://img.shields.io/badge/part%20of-deep--suite-5b8def)](https://github.com/Sungmin-Cho/claude-deep-suite)
+[![version](https://img.shields.io/github/package-json/v/Sungmin-Cho/deep-work?label=version)](https://github.com/Sungmin-Cho/deep-work)
+[![license](https://img.shields.io/github/license/Sungmin-Cho/deep-work)](./LICENSE)
+[![part of deep-suite](https://img.shields.io/badge/part%20of-deep--suite-5b8def)](https://github.com/Sungmin-Cho/deep-suite)
 
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)와 Codex를 위한 **Evidence-Driven Development Protocol**. 단일 커맨드가 Brainstorm → Research → Spec → Plan → Implement → Test → Integrate 전체 워크플로우를 구동하며, TDD 강제, receipt 기반 증거 수집, 계획과 코딩의 엄격한 분리를 제공합니다.
 
@@ -12,29 +12,29 @@ deep-work는 복잡한 작업에서 AI 코딩이 흔히 빠지는 실패 모드�
 
 ## deep-suite에서의 역할
 
-deep-work는 [claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite)의 **핵심 하네스 엔진**으로, [Harness Engineering](https://martinfowler.com/articles/harness-engineering.html) 프레임워크(Böckeler/Fowler, 2026)를 구현합니다. Guide/Sensor × Computational/Inferential 매트릭스에서:
+deep-work는 [deep-suite](https://github.com/Sungmin-Cho/deep-suite)의 **핵심 하네스 엔진**으로, [Harness Engineering](https://martinfowler.com/articles/harness-engineering.html) 프레임워크(Böckeler/Fowler, 2026)를 구현합니다. Guide/Sensor × Computational/Inferential 매트릭스에서:
 
 - **Computational Guides** — Phase Guard hook(편집 물리적 차단), Worktree Guard(P0, worktree 외부 쓰기 hard-block), 자동 stop-and-replan이 포함된 인증된 correct-RED → GREEN → REFACTOR 권위, 토폴로지 템플릿.
 - **Computational Sensors** — linter/typecheck/coverage/mutation 파이프라인, 드리프트 센서, fitness 규칙, review-check 센서, Phase Transition Injector(P1).
 - **Inferential Guides** — research / plan / brainstorm 문서, Sprint Contract.
 - **Self-Correction Loop** — SENSOR_RUN → SENSOR_FIX → SENSOR_CLEAN, 센서별 3-round 제한.
 
-[deep-review](https://github.com/Sungmin-Cho/claude-deep-review)와 [deep-dashboard](https://github.com/Sungmin-Cho/claude-deep-dashboard)가 소비하는 producer-authenticated functional receipt, governed progress projection, health report를 생성합니다.
+[deep-review](https://github.com/Sungmin-Cho/deep-review)와 [deep-dashboard](https://github.com/Sungmin-Cho/deep-dashboard)가 소비하는 producer-authenticated functional receipt, governed progress projection, health report를 생성합니다.
 
 ## 설치
 
 `claude-deep-suite` 마켓플레이스 (권장):
 
 ```bash
-/plugin marketplace add Sungmin-Cho/claude-deep-suite
+/plugin marketplace add Sungmin-Cho/deep-suite
 /plugin install deep-work@claude-deep-suite
 ```
 
 이 저장소에서 단독 설치:
 
 ```bash
-/plugin marketplace add Sungmin-Cho/claude-deep-work
-/plugin install deep-work@Sungmin-Cho-claude-deep-work
+/plugin marketplace add Sungmin-Cho/deep-work
+/plugin install deep-work@Sungmin-Cho-deep-work
 ```
 
 deep-work는 Claude Code와 Codex 플러그인 런타임 모두에서 동작합니다 — 각자 native manifest를 읽고, skill 호출자는 동일한 skill-native invocation 모델을 사용합니다.
@@ -155,7 +155,7 @@ deep-work는 sibling 플러그인이 설치된 경우 연동되며, 모든 동�
 ## 링크
 
 - [CHANGELOG](CHANGELOG.ko.md) — 릴리스 히스토리
-- [claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite) — 마켓플레이스와 sibling 플러그인
+- [deep-suite](https://github.com/Sungmin-Cho/deep-suite) — 마켓플레이스와 sibling 플러그인
 - [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md)
 
 ## 라이선스

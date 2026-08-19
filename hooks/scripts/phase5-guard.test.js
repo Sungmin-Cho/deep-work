@@ -776,6 +776,6 @@ describe('phase-guard.sh — Phase 5 mode (RC-1)', () => {
     const r = runGuard('Bash', {
       command: `bash ${fakePluginHelper} /tmp/state 2026-04-19T00:00:00Z`,
     });
-    assert.equal(r.status, 2, 'HOME prefix 밖 + claude-deep-suite 외 plugin은 모두 차단');
+    assert.equal(r.status, 2, 'HOME prefix 밖 + deep-suite 외 plugin은 모두 차단');
   });
 });

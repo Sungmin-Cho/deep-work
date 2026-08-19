@@ -22,7 +22,7 @@ describe('update-check.sh — remote URL', () => {
     // documents the old broken path.
     const urlLine = src.split('\n').find((l) => l.trim().startsWith('REMOTE_URL='));
     assert.ok(urlLine, 'REMOTE_URL assignment line present');
-    assert.match(urlLine, /raw\.githubusercontent\.com\/Sungmin-Cho\/claude-deep-work\/main\/package\.json/);
+    assert.match(urlLine, /raw\.githubusercontent\.com\/Sungmin-Cho\/deep-work\/main\/package\.json/);
     assert.doesNotMatch(urlLine, /plugins\/deep-work/);
   });
 });

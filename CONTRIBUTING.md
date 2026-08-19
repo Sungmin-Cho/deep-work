@@ -2,13 +2,13 @@
 
 Thanks for your interest in improving **deep-work** — the Evidence-Driven
 Development Protocol plugin and core harness engine of the
-[claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite).
+[deep-suite](https://github.com/Sungmin-Cho/deep-suite).
 
 ## Getting started
 
 ```bash
-git clone https://github.com/Sungmin-Cho/claude-deep-work.git
-cd claude-deep-work
+git clone https://github.com/Sungmin-Cho/deep-work.git
+cd deep-work
 ```
 
 Node 22+ is required (`package.json` `engines`). The plugin's runtime is
@@ -52,7 +52,7 @@ below remain mandatory regardless of which agent or host performs the work.
 4. Explain what changed and why.
 
 After a release lands on `main`, the suite marketplace pin is updated in the
-[claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite) repository —
+[deep-suite](https://github.com/Sungmin-Cho/deep-suite) repository —
 not here.
 
 ## Reporting issues
