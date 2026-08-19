@@ -177,7 +177,7 @@ fi
 # ─── Artifacts collection (defensive, envelope-aware v6.5.0) ───────
 # read_json_safe <path> [<expected_producer> [<expected_artifact_kind>]]
 #
-# Detects M3 envelope wrapping (cf. claude-deep-suite/docs/envelope-migration.md
+# Detects M3 envelope wrapping (cf. deep-suite/docs/envelope-migration.md
 # §1: schema_version === "1.0" + envelope object + payload key) and returns
 # `.payload` instead of the wrapped root. Identity guard: when expected_producer
 # / expected_artifact_kind are provided, foreign envelopes resolve to null
@@ -232,7 +232,7 @@ fi
 
 # deep-review (C2 fix: 설치된 경우 항상 object 반환)
 # v6.5.0 envelope-aware: recurring-findings will be wrapped in M3 envelope when
-# claude-deep-review adopts it (Phase 2 priority #5). Identity guard prevents
+# deep-review adopts it (Phase 2 priority #5). Identity guard prevents
 # foreign envelopes at the same path from leaking into our consumption.
 if printf '%s' "$PLUGINS_JSON" | jq -e '.installed[]? | select(.=="deep-review")' >/dev/null 2>&1; then
   rf=$(read_json_safe "$PROJECT_ROOT/.deep-review/recurring-findings.json" "deep-review" "recurring-findings")
@@ -308,7 +308,7 @@ fi
 if printf '%s' "$PLUGINS_JSON" | jq -e '.installed[]? | select(.=="deep-evolve")' >/dev/null 2>&1; then
   # current.json is a small index file maintained by deep-evolve — left as legacy
   # (no envelope expected). evolve-insights.json will move to envelope when
-  # claude-deep-evolve adopts M3 (Phase 2 priority #4).
+  # deep-evolve adopts M3 (Phase 2 priority #4).
   current_json=$(read_json_safe "$PROJECT_ROOT/.deep-evolve/current.json")
   if [[ "$current_json" != "null" ]]; then
     evolve_sid=$(printf '%s' "$current_json" | jq -r '.session_id // empty')
@@ -328,7 +328,7 @@ fi
 
 # deep-wiki (C2 fix)
 # v6.5.0 envelope-aware: wiki index.json will move to envelope when
-# claude-deep-wiki adopts M3 (Phase 2 priority #6). Until then, the legacy
+# deep-wiki adopts M3 (Phase 2 priority #6). Until then, the legacy
 # pass-through branch keeps `pages` at the top level. After adoption, the
 # read_json_safe envelope unwrap returns the payload, which keeps `pages` at
 # the same top level — so the `.pages | length` jq expression remains correct.

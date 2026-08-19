@@ -69,7 +69,7 @@ incomplete.
 
 Starting in deep-work v6.5.0 the receipt file at
 `$WORK_DIR/receipts/SLICE-NNN.json` is wrapped in the M3 cross-plugin envelope
-(cf. `claude-deep-suite/docs/envelope-migration.md` §1). The legacy receipt
+(cf. `deep-suite/docs/envelope-migration.md` §1). The legacy receipt
 fields move under `payload`; the producer / artifact_kind / run_id / git
 metadata are emitted by the wrap helper. Do NOT hand-author the envelope —
 use the helper script so ULID, RFC 3339 timestamp, and SemVer producer_version

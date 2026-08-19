@@ -4,8 +4,8 @@
  * handoff-roundtrip.test.js — M5.5 #8 (deep-work half) + M5.7.A test target.
  *
  * Verifies emit-handoff.js + emit-compaction-state.js produce envelope-wrapped
- * artifacts that satisfy the claude-deep-dashboard suite-collector's
- * `unwrapStrict` contract (cf. claude-deep-dashboard/lib/suite-collector.js).
+ * artifacts that satisfy the deep-dashboard suite-collector's
+ * `unwrapStrict` contract (cf. deep-dashboard/lib/suite-collector.js).
  *
  * The contract has four layers — each test exercises at least one:
  *   1. envelope-shape (schema_version === '1.0', envelope + payload present)
@@ -53,7 +53,7 @@ const EMIT_COMPACTION = path.resolve(__dirname, '..', 'hooks', 'scripts', 'emit-
 const VALIDATE_CLI = path.resolve(__dirname, '..', 'scripts', 'validate-envelope-emit.js');
 
 // Dashboard's PAYLOAD_REQUIRED_FIELDS — must match
-// claude-deep-dashboard/lib/suite-constants.js exactly.
+// deep-dashboard/lib/suite-constants.js exactly.
 const DASHBOARD_HANDOFF_REQUIRED = [
   'schema_version', 'handoff_kind', 'from', 'to', 'summary', 'next_action_brief',
 ];
@@ -88,7 +88,7 @@ function runValidate(file) {
 }
 
 /**
- * Mirror of claude-deep-dashboard/lib/suite-collector.js `unwrapStrict` (the
+ * Mirror of deep-dashboard/lib/suite-collector.js `unwrapStrict` (the
  * contract this emit needs to satisfy). Kept zero-dep so the deep-work plugin
  * doesn't have to import dashboard code.
  *

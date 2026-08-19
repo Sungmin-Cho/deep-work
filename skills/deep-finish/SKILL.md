@@ -81,7 +81,7 @@ Scan `$WORK_DIR/receipts/` for all `SLICE-*.json` files. For each:
 
 **Generate `$WORK_DIR/session-receipt.json`** (derived cache — canonical source
 is slice receipts) **wrapped in the M3 cross-plugin envelope** (deep-work
-v6.5.0; cf. `claude-deep-suite/docs/envelope-migration.md` §1).
+v6.5.0; cf. `deep-suite/docs/envelope-migration.md` §1).
 
 > **Two-step protocol**: the legacy session-receipt body ("payload")
 > is built first into a temp file; quality fields (Section 2-1) and

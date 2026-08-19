@@ -25,7 +25,7 @@ SNOOZE_FILE="$STATE_DIR/.deep-work-update-snoozed"
 # is read the same way). The previous `.../main/plugins/deep-work/package.json`
 # path 404'd — the repo has no plugins/ subtree — so every fetch failed and the
 # "up to date" cache below was written from an empty response (see Step 4).
-REMOTE_URL="https://raw.githubusercontent.com/Sungmin-Cho/claude-deep-work/main/package.json"
+REMOTE_URL="https://raw.githubusercontent.com/Sungmin-Cho/deep-work/main/package.json"
 
 # ─── Read local version from package.json ─────────────────────
 LOCAL=""

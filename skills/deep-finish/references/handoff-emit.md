@@ -34,7 +34,7 @@ The dashboard's `suite.handoff.roundtrip_success_rate` metric reads these.
 
   (2)/(3)/(4) → set `HANDOFF_TO` accordingly; (1) → skip this block.
 
-**Payload composition** (per `claude-deep-suite/schemas/handoff.schema.json`):
+**Payload composition** (per `deep-suite/schemas/handoff.schema.json`):
 
 Write `$WORK_DIR/.handoff.payload.json` with the LLM-composed payload. Pull
 fields from the session-receipt + slice receipts + any review reports under

@@ -11,7 +11,7 @@
  *   - envelope.artifact_kind === 'handoff'
  *   - envelope.schema.name === 'handoff'
  *   - envelope.schema.version === '1.0'
- * Payload required fields (cf. claude-deep-suite/schemas/handoff.schema.json):
+ * Payload required fields (cf. deep-suite/schemas/handoff.schema.json):
  *   schema_version, handoff_kind, from, to, summary, next_action_brief
  *
  * Cross-plugin chain (closes via envelope.parent_run_id):
@@ -38,7 +38,7 @@
  *   - This helper does NOT validate the payload against the full suite schema
  *     (no ajv dep). It enforces the dashboard's hard-required field set; the
  *     companion validator (scripts/validate-envelope-emit.js) catches envelope
- *     shape violations; CI in claude-deep-suite catches schema drift.
+ *     shape violations; CI in deep-suite catches schema drift.
  */
 
 const fs = require('node:fs');
@@ -66,7 +66,7 @@ const HANDOFF_REQUIRED = [
   'next_action_brief',
 ];
 
-// R1 review C4: handoff_kind enum from claude-deep-suite/schemas/handoff.schema.json.
+// R1 review C4: handoff_kind enum from deep-suite/schemas/handoff.schema.json.
 // Previously not enforced — a typo (`phase-5-evolve` missing `to`) would write
 // successfully and pollute dashboard telemetry.
 const VALID_HANDOFF_KINDS = new Set([

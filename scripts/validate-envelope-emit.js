@@ -3,7 +3,7 @@
 
 /**
  * validate-envelope-emit.js — Self-test validator for deep-work's M3 envelope
- * emission. Mirrors the suite-side schema (claude-deep-suite/schemas/
+ * emission. Mirrors the suite-side schema (deep-suite/schemas/
  * artifact-envelope.schema.json) without external deps so this works as a
  * release-lint inside the deep-work plugin's own CI/test pipeline.
  *
@@ -49,7 +49,7 @@ const SCHEMA_VERSION_RE = /^\d+\.\d+$/;
 
 const PLUGIN_NAME = 'deep-work';
 // 'handoff' and 'compaction-state' added in v6.6.0 (M5.7 cross-plugin long-run
-// handoff + dashboard compaction telemetry). Schemas live in claude-deep-suite/
+// handoff + dashboard compaction telemetry). Schemas live in deep-suite/
 // schemas/{handoff,compaction-state}.schema.json.
 const ALLOWED_KINDS = new Set([
   'session-receipt',
@@ -240,7 +240,7 @@ function validateRoot(obj, errors) {
   validateEnvelopeBlock(obj.envelope, errors);
 
   // Payload shape: minimal — non-null, non-array object. Domain-specific
-  // payload schema lives in claude-deep-suite payload-registry (Phase 3).
+  // payload schema lives in deep-suite payload-registry (Phase 3).
   if (obj.payload === null || typeof obj.payload !== 'object' || Array.isArray(obj.payload)) {
     errors.push('payload: must be a non-null, non-array object');
   }

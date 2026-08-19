@@ -12,7 +12,7 @@
  *   - envelope.artifact_kind === 'compaction-state'
  *   - envelope.schema.name === 'compaction-state'
  *   - envelope.schema.version === '1.0'
- * Payload required fields (cf. claude-deep-suite/schemas/compaction-state.schema.json):
+ * Payload required fields (cf. deep-suite/schemas/compaction-state.schema.json):
  *   schema_version, compacted_at, trigger, preserved_artifact_paths
  *
  * Trigger enum (must match schemas/compaction-state.schema.json):

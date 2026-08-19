@@ -50,7 +50,7 @@ Receipts are stored in `$WORK_DIR/receipts/SLICE-NNN.json`.
 **Envelope-aware reads**: deep-work 6.5.0 부터 SLICE-*.json 과
 `session-receipt.json` 는 M3 cross-plugin envelope (`{schema_version: "1.0",
 envelope: {...}, payload: {...}}`) 로 emit 된다 (cf.
-`claude-deep-suite/docs/envelope-migration.md` §1). 본 명령의 모든 receipt
+`deep-suite/docs/envelope-migration.md` §1). 본 명령의 모든 receipt
 read 단계에서 다음 unwrap 규칙을 적용한다:
 
 1. JSON 파싱 후 root 가 envelope 형태이면 (`schema_version === "1.0"`,

@@ -4,13 +4,13 @@
 
 Security fixes are delivered through the latest release of deep-work and a
 refreshed marketplace pin in the
-[claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite) repository.
+[deep-suite](https://github.com/Sungmin-Cho/deep-suite) repository.
 Check the current version with `jq -r .version .claude-plugin/plugin.json`.
 
 ## Reporting a vulnerability
 
 Please report security issues **privately** via
-[GitHub Security Advisories](https://github.com/Sungmin-Cho/claude-deep-work/security/advisories/new)
+[GitHub Security Advisories](https://github.com/Sungmin-Cho/deep-work/security/advisories/new)
 rather than opening a public issue.
 
 We aim to acknowledge reports within a few days and will coordinate a fix and a
@@ -28,7 +28,7 @@ The Phase Guard enforces a dangerous-command denylist (e.g. `curl | sh`,
 `rm -rf` on protected paths, `npm publish`, destructive `kubectl`/SQL,
 `dd`/`mkfs`); each family can be overridden with a per-family `CLAUDE_ALLOW_*`
 env var. See also the suite-wide denylist guidance in
-[`guides/hook-patterns.md`](https://github.com/Sungmin-Cho/claude-deep-suite/blob/main/guides/hook-patterns.md).
+[`guides/hook-patterns.md`](https://github.com/Sungmin-Cho/deep-suite/blob/main/guides/hook-patterns.md).
 
 When reporting, please indicate the plugin version and runtime (Claude Code or
 Codex) affected.

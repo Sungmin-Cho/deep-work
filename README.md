@@ -2,9 +2,9 @@
 
 # deep-work
 
-[![version](https://img.shields.io/github/package-json/v/Sungmin-Cho/claude-deep-work?label=version)](https://github.com/Sungmin-Cho/claude-deep-work)
-[![license](https://img.shields.io/github/license/Sungmin-Cho/claude-deep-work)](./LICENSE)
-[![part of deep-suite](https://img.shields.io/badge/part%20of-deep--suite-5b8def)](https://github.com/Sungmin-Cho/claude-deep-suite)
+[![version](https://img.shields.io/github/package-json/v/Sungmin-Cho/deep-work?label=version)](https://github.com/Sungmin-Cho/deep-work)
+[![license](https://img.shields.io/github/license/Sungmin-Cho/deep-work)](./LICENSE)
+[![part of deep-suite](https://img.shields.io/badge/part%20of-deep--suite-5b8def)](https://github.com/Sungmin-Cho/deep-suite)
 
 An **Evidence-Driven Development Protocol** for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex. A single command drives a full Brainstorm → Research → Spec → Plan → Implement → Test → Integrate workflow with TDD enforcement, receipt-based evidence collection, and a hard separation between planning and coding.
 
@@ -12,29 +12,29 @@ deep-work fights the common failure modes of AI coding on complex tasks: introdu
 
 ## Role in deep-suite
 
-deep-work is the **core harness engine** of the [claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite), implementing the [Harness Engineering](https://martinfowler.com/articles/harness-engineering.html) framework (Böckeler/Fowler, 2026). Across the Guide/Sensor × Computational/Inferential matrix it provides:
+deep-work is the **core harness engine** of the [deep-suite](https://github.com/Sungmin-Cho/deep-suite), implementing the [Harness Engineering](https://martinfowler.com/articles/harness-engineering.html) framework (Böckeler/Fowler, 2026). Across the Guide/Sensor × Computational/Inferential matrix it provides:
 
 - **Computational Guides** — Phase Guard hook (physically blocks edits), Worktree Guard (P0, hard-blocks writes outside the worktree), authenticated correct-RED → GREEN → REFACTOR authority with automatic stop-and-replan, and topology templates.
 - **Computational Sensors** — linter/typecheck/coverage/mutation pipeline, drift sensors, fitness rules, the review-check sensor, and the Phase Transition Injector (P1).
 - **Inferential Guides** — research / plan / brainstorm documents and the Sprint Contract.
 - **Self-Correction Loop** — SENSOR_RUN → SENSOR_FIX → SENSOR_CLEAN with a per-sensor 3-round limit.
 
-It emits producer-authenticated functional receipts, governed progress projections, and health reports that [deep-review](https://github.com/Sungmin-Cho/claude-deep-review) and [deep-dashboard](https://github.com/Sungmin-Cho/claude-deep-dashboard) consume.
+It emits producer-authenticated functional receipts, governed progress projections, and health reports that [deep-review](https://github.com/Sungmin-Cho/deep-review) and [deep-dashboard](https://github.com/Sungmin-Cho/deep-dashboard) consume.
 
 ## Install
 
 Via the `claude-deep-suite` marketplace (recommended):
 
 ```bash
-/plugin marketplace add Sungmin-Cho/claude-deep-suite
+/plugin marketplace add Sungmin-Cho/deep-suite
 /plugin install deep-work@claude-deep-suite
 ```
 
 Standalone, from this repository:
 
 ```bash
-/plugin marketplace add Sungmin-Cho/claude-deep-work
-/plugin install deep-work@Sungmin-Cho-claude-deep-work
+/plugin marketplace add Sungmin-Cho/deep-work
+/plugin install deep-work@Sungmin-Cho-deep-work
 ```
 
 deep-work runs in both the Claude Code and Codex plugin runtimes — each reads its native manifest, and skill callers use the same skill-native invocation model.
@@ -155,7 +155,7 @@ deep-work integrates with sibling plugins when they are installed, always with u
 ## Links
 
 - [CHANGELOG](CHANGELOG.md) — release history
-- [claude-deep-suite](https://github.com/Sungmin-Cho/claude-deep-suite) — the marketplace and sibling plugins
+- [deep-suite](https://github.com/Sungmin-Cho/deep-suite) — the marketplace and sibling plugins
 - [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md)
 
 ## License
