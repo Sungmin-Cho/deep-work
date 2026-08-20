@@ -276,7 +276,7 @@ append_session_history() {
       # Per-field grep extraction below works on either shape because
       # envelope keys (producer, producer_version, artifact_kind, run_id,
       # generated_at, schema, git, provenance) do not collide with payload
-      # keys (slice_id, status, tdd_mode, model_used, etc.).
+      # keys (slice_id, status, tdd_mode, harness_metadata.model_id, etc.).
       if grep -q '"envelope"[[:space:]]*:' "$receipt_file" 2>/dev/null \
          && grep -q '"schema_version"[[:space:]]*:[[:space:]]*"1\.0"' "$receipt_file" 2>/dev/null; then
         # Envelope-shaped — verify producer + artifact_kind + schema.name.
@@ -297,7 +297,13 @@ append_session_history() {
       slice_id=$(grep -o '"slice_id"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
       slice_status=$(grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
       slice_tdd_mode=$(grep -o '"tdd_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
-      slice_model=$(grep -o '"model_used"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
+      # harness_metadata.model_id is the current receipt contract
+      # (agents/implement-slice-worker.md); top-level "model_used" survives
+      # only in legacy pre-envelope receipts (receipt-migration.js).
+      slice_model=$(grep -o '"model_id"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
+      if [[ -z "$slice_model" ]]; then
+        slice_model=$(grep -o '"model_used"[[:space:]]*:[[:space:]]*"[^"]*"' "$receipt_file" 2>/dev/null | head -1 | sed 's/.*:.*"\([^"]*\)".*/\1/' || echo "")
+      fi
 
       # harness_metadata fields (may not exist in older receipts)
       local hm_block
