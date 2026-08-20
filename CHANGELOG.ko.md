@@ -7,6 +7,12 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [7.2.3] — 2026-08-20 (세션 종료 모델 추출)
+
+### Fixed
+
+- **envelope 시대 slice receipt의 모델이 세션 기록에 저장됩니다.** session-end.sh가 먼저 harness_metadata.model_id를 읽고 legacy top-level model_used로 fallback하며, 회귀 테스트는 hooks/scripts/session-end-model-extract.test.js에 있습니다.
+
 ## [7.2.2] — 2026-08-18 (따옴표 인식 리다이렉트 판정)
 
 ### Fixed

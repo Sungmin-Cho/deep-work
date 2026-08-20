@@ -1,6 +1,6 @@
 {
   "name": "deep-work",
-  "version": "7.2.2",
+  "version": "7.2.3",
   "description": "Evidence-Driven Development Protocol — 24 command-equivalent skill surfaces plus a skill-native deep-work entry alias (cross-platform: Claude Code skills + Codex / Copilot CLI / Gemini CLI / SDK), 3-layer architecture with Skill-based phase dispatch, computational enforcement (worktree guard + phase transition injection), TDD enforcement, and receipt validation",
   "author": {
     "name": "sungmin"
