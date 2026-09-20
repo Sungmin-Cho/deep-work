@@ -7,6 +7,14 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [7.4.1] — 2026-09-20
+
+### 수정
+
+- 등록된 PreToolUse 훅이 governed·legacy 가드의 원래 차단 사유를 stderr에도 전달합니다. Codex와 Claude에서 stdout JSON과 종료 코드 2를 유지하며, 결정 출력이 없거나 잘못된 경우 대체 진단을 제공하고 기존 stderr 진단도 보존합니다.
+- Governed 셸 차단 사유에 지원되는 단일 조회 명령과 지원하지 않는 `sed`, 파이프, 복합 명령의 대안을 안내합니다. 허용·차단 정책은 변경하지 않습니다.
+- 실제 등록 명령을 통해 정책 차단, 잘못된 쓰기 입력, 내부 예외, 정상 조회를 회귀 검증합니다. 두 호스트의 플러그인 루트 환경변수 및 Windows 네이티브 어댑터 검증을 포함합니다.
+
 ## [7.4.0] — 2026-09-07 (목표 완수와 모델 판단 보존)
 
 ### Added

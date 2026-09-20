@@ -7,6 +7,14 @@ All notable changes to the Deep Work plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.1] — 2026-09-20
+
+### Fixed
+
+- Registered PreToolUse hooks now mirror the original block reason to stderr for Codex and Claude, preserving stdout JSON and exit code 2 across governed and legacy guards. Missing or malformed decision output receives a fallback diagnostic; existing stderr diagnostics remain intact.
+- Governed shell denials explain supported single-command reads and alternatives to unsupported `sed`, pipes, and compound commands. Admission policy is unchanged.
+- Regression tests exercise registered commands for policy blocks, malformed write inputs, internal exceptions, and successful reads, including both plugin-root environment conventions and native Windows adapter coverage.
+
 ## [7.4.0] — 2026-09-07 (Goal Completion and Model Judgment)
 
 ### Added

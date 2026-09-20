@@ -116,23 +116,43 @@ function runHookScript(hookName, options = {}) {
   const pluginRoot = options.pluginRoot || PLUGIN_ROOT;
   const scriptPath = pathApi.resolve(pluginRoot, 'hooks', 'scripts', scriptName);
   const scriptArg = platform === 'win32' ? toGitBashPath(scriptPath) : scriptPath;
-  const capture = options.capture === true;
+  // Guard decisions must be visible to hosts that consume exit-2 reasons only
+  // from stderr. Keep stdout JSON intact for existing host/readers.
+  const guard = hookName === 'phase-guard';
+  const capture = options.capture === true || guard;
   const hasInput = Object.hasOwn(options, 'input');
+  const stdin = hasInput ? 'pipe' : options.capture === true ? 'ignore' : 'inherit';
   const result = run(bash, [scriptArg], {
     cwd: options.cwd || process.cwd(),
     env,
     encoding: 'utf8',
     ...(hasInput ? { input: options.input } : {}),
     shell: false,
-    stdio: capture ? [hasInput ? 'pipe' : 'ignore', 'pipe', 'pipe'] : 'inherit',
+    stdio: capture ? [stdin, 'pipe', 'pipe'] : 'inherit',
     windowsHide: true,
   }) || {};
 
   if (Number.isInteger(result.status)) {
+    const stdout = typeof result.stdout === 'string' ? result.stdout : '';
+    let stderr = typeof result.stderr === 'string' ? result.stderr : '';
+    if (guard && result.status === 2) {
+      let reason;
+      try {
+        const decision = JSON.parse(stdout);
+        if (decision.decision === 'block' && typeof decision.reason === 'string'
+            && decision.reason.trim()) reason = decision.reason;
+      } catch {}
+      if (reason && !stderr.includes(reason)) {
+        stderr += `${stderr && !stderr.endsWith('\n') ? '\n' : ''}${reason}\n`;
+      } else if (!stderr.trim()) {
+        stderr = 'deep-work phase guard blocked the tool without a readable reason; '
+          + 'run /deep-status to inspect the session.\n';
+      }
+    }
     return {
       status: result.status,
-      stdout: typeof result.stdout === 'string' ? result.stdout : '',
-      stderr: typeof result.stderr === 'string' ? result.stderr : '',
+      stdout,
+      stderr,
     };
   }
 

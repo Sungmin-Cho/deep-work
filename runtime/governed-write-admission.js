@@ -36,7 +36,7 @@ async function admitGovernedWrite({stateCapability,planCapability,toolContext}={
   const context=toolContext,tool=context.toolName;
   if(tool==='Bash'){
     if(runtimeCommand(context.toolInput.command,stateCapability,fields)||readCommand(context.toolInput.command))return {decision:'allow'};
-    return block('use the exact runtime route; arbitrary shell execution has no write authority');
+    return block('use the exact runtime route; arbitrary shell execution has no write authority. For reads, use one command per tool call (for example: pwd, rg --files, or head -n 5 AGENTS.md); sed, pipes, and compound commands are not supported');
   }
   if(!['Write','Edit','MultiEdit','apply_patch','NotebookEdit'].includes(tool))return {decision:'allow'};
   const extracted=require('./hook-context.js').extractMutationTargets(context);if(!extracted.valid||!extracted.targets.length)return block('unknown targets');

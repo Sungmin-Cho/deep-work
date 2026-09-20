@@ -939,3 +939,85 @@ test('SessionStart adapter stays silent when its probe has no context', () => {
 
   assert.deepEqual(result, { status: 0, output: null, stderr: '' });
 });
+
+
+test('registered PreToolUse preserves JSON and adds a readable exit-2 reason for both hosts', (t) => {
+  const fixture = makeFixture(t);
+  const scripts = path.join(fixture.root, 'hooks', 'scripts');
+  fs.copyFileSync(path.join(__dirname, 'hook-shell-adapter.js'), path.join(scripts, 'hook-shell-adapter.js'));
+  const entry = registeredEntries().find(({ mode }) => mode === 'pre-tool-use');
+  const reason = '차단: "quoted" path\nUse /deep-status';
+  for (const rootVar of ['CLAUDE_PLUGIN_ROOT', 'PLUGIN_ROOT']) {
+    for (const row of [
+      { status: 2, stdout: JSON.stringify({ decision: 'block', reason }), stderr: '', expected: reason + '\n' },
+      { status: 2, stdout: JSON.stringify({ decision: 'block', reason }), stderr: 'diagnostic', expected: 'diagnostic\n' + reason + '\n' },
+      { status: 2, stdout: JSON.stringify({ decision: 'block', reason }), stderr: reason + '\n', expected: reason + '\n' },
+      { status: 2, stdout: 'broken JSON', stderr: '', expected: /without a readable reason/ },
+      { status: 2, stdout: '{"decision":"block","reason":" "}', stderr: '', expected: /without a readable reason/ },
+      { status: 0, stdout: '{"decision":"allow"}', stderr: '', expected: '' },
+    ]) {
+      fs.writeFileSync(path.join(scripts, 'phase-guard.sh'),
+        `#!/bin/sh\nnode -e 'process.stdout.write(process.env.DW_TEST_OUT);process.stderr.write(process.env.DW_TEST_ERR);process.exitCode=Number(process.env.DW_TEST_STATUS)'\n`);
+      const result = runRegistered(entry, { cwd: fixture.base, env: {
+        [rootVar]: fixture.root, DW_TEST_OUT: row.stdout, DW_TEST_ERR: row.stderr, DW_TEST_STATUS: String(row.status),
+      }});
+      assert.equal(result.status, row.status, resultDetail(entry, result));
+      assert.equal(result.stdout, row.stdout);
+      if (row.expected instanceof RegExp) assert.match(result.stderr, row.expected);
+      else assert.equal(result.stderr, row.expected);
+    }
+  }
+});
+
+test('registered legacy guard reports normal, malformed-write, and internal-error blocks on stderr', (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'dw-legacy-reason-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.claude'));
+  const state = path.join(root, '.claude', 'deep-work.reason.md');
+  const entry = registeredEntries().find(({ mode }) => mode === 'pre-tool-use');
+  const preload = path.join(root, 'inject-core-error.cjs');
+  fs.writeFileSync(preload, `if (process.argv[1]?.endsWith('phase-guard-core.js')) {
+    JSON.parse = () => { throw new Error('test injected core exception'); };
+  }`);
+  for (const rootVar of ['CLAUDE_PLUGIN_ROOT', 'PLUGIN_ROOT']) {
+    fs.writeFileSync(state, '---\ncurrent_phase: spec\nwork_dir: ""\n---\n');
+    const env = { [rootVar]: PLUGIN_ROOT, DEEP_WORK_SESSION_ID: 'reason' };
+    for (const toolInput of [{ file_path: path.join(root, 'src.js'), content: 'bad' }, null]) {
+      const result = runRegistered(entry, { cwd: root, env,
+        input: JSON.stringify({ tool_name: 'Write', tool_input: toolInput }),
+      });
+      assert.equal(result.status, 2, resultDetail(entry, result));
+      const decision = JSON.parse(result.stdout);
+      assert.equal(decision.decision, 'block');
+      assert.ok(result.stderr.includes(decision.reason), resultDetail(entry, result));
+    }
+    const allowed = runRegistered(entry, { cwd: root, env,
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'pwd' } }),
+    });
+    assert.equal(allowed.status, 0, resultDetail(entry, allowed));
+    assert.equal(allowed.stderr, '');
+    fs.writeFileSync(state, '---\ncurrent_phase: implement\ntdd_mode: strict\ntdd_state: PENDING\n---\n');
+    const failed = runRegistered(entry, { cwd: root,
+      env: { ...env, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` },
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'pwd' } }),
+    });
+    assert.equal(failed.status, 2, resultDetail(entry, failed));
+    assert.match(JSON.parse(failed.stdout).reason, /내부 검증 오류/);
+    assert.ok(failed.stderr.includes(JSON.parse(failed.stdout).reason), resultDetail(entry, failed));
+    assert.match(fs.readFileSync(path.join(root, '.claude', 'deep-work-guard-errors.log'), 'utf8'), /test injected core exception/);
+  }
+});
+
+
+test('guard capture inherits registered stdin while preserving explicit capture input semantics', () => {
+  const { runHookScript } = require('./hook-shell-adapter.js');
+  for (const [options, stdin] of [[{}, 'inherit'], [{ capture: true }, 'ignore'], [{ input: 'payload' }, 'pipe']]) {
+    runHookScript('phase-guard', { ...options, bashExecutable: 'bash',
+      run: (_executable, _args, spawnOptions) => {
+        assert.deepEqual(spawnOptions.stdio, [stdin, 'pipe', 'pipe']);
+        assert.equal(spawnOptions.input, options.input);
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    });
+  }
+});
