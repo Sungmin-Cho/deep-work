@@ -13,8 +13,8 @@ const EXPLICIT_MODELS=Object.freeze({codex:Object.freeze(['gpt-6-astra'])});
 // "everyday work" 설명은 6.1 Sol로 넘어갔다 → standard도 6.1 Sol로 옮긴다.
 // 그 결과 codex의 standard와 deep은 같은 모델이므로 두 tier 사이의 이동은 Codex 모델을 바꾸지 않는다. effort는 tier가 아니라
 // risk profile과 role(EFFORT_CATALOG)로 정해진다.
-// gpt-6-astra는 EXPLICIT_MODELS에만 두어 명시 pin으로만 쓰인다. gpt-5.6-* 와 gpt-6-sol id는 기존 receipt/pin이 계속
-// 해석되도록 model-capabilities.js에서 계속 인식한다(기본값이 아닐 뿐).
+// gpt-6-astra는 EXPLICIT_MODELS에만 두어 명시 pin으로만 쓰인다. gpt-5.6-* id는 기존 receipt/pin이 계속 해석되도록
+// model-capabilities.js에서 계속 인식한다(기본값이 아닐 뿐). gpt-6-sol은 명시 pin용으로 새로 인식한다(기본값이었던 적 없음).
 // 가격 자체는 routing formula에 넣지 않는다. stakes/error cost는 기존 methodology risk floor가 담당한다.
 const DEFAULT_CATALOG = Object.freeze({
   claude: Object.freeze({ light: 'haiku', standard: 'sonnet', deep: 'opus', main: MAIN }),

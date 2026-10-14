@@ -12,7 +12,7 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 ### 변경
 
 - Codex 카탈로그를 각 라인의 최신 세대로 옮깁니다. light는 `gpt-6-luna`, standard와 deep은 `gpt-6.1-sol`입니다. Terra는 GPT-6 후속이 없고 Codex가 "Older"로 표기하며 가격도 6.1 Sol보다 낮지 않아 standard에서 제외했습니다. standard와 deep이 같은 모델로 해석되므로 두 tier 사이의 이동은 Codex 모델을 바꾸지 않습니다. effort는 이전처럼 tier가 아니라 risk profile과 role로 정해집니다. `CATALOG_VERSION`은 3입니다.
-- `gpt-5.6-*`와 `gpt-6-sol`은 기존 receipt와 pin이 계속 해석되도록 인식하지만 더 이상 기본값이 아닙니다. `gpt-6-astra`는 명시 pin 전용으로 유지합니다.
+- `gpt-5.6-*`는 기존 receipt와 pin이 계속 해석되도록 인식하지만 더 이상 기본값이 아닙니다. `gpt-6-sol`은 명시 pin용으로 새로 인식합니다. `gpt-6-astra`는 명시 pin 전용으로 유지합니다.
 
 ### 수정
 

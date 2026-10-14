@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The Codex catalogue moves to the latest generation of each line: light `gpt-6-luna`, standard and deep `gpt-6.1-sol`. Terra has no GPT-6 successor, Codex labels it "Older" and it is priced no lower than 6.1 Sol, so standard moves off it. Standard and deep now resolve to the same model, so moving between them no longer changes the Codex model; effort still follows the risk profile and role, not the tier. `CATALOG_VERSION` is 3.
-- `gpt-5.6-*` and `gpt-6-sol` stay recognized for existing receipts and pins but are no longer defaults. `gpt-6-astra` remains explicit-only.
+- `gpt-5.6-*` stay recognized for existing receipts and pins but are no longer defaults. `gpt-6-sol` is newly recognized for explicit pins. `gpt-6-astra` remains explicit-only.
 
 ### Fixed
 
