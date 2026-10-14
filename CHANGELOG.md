@@ -7,6 +7,18 @@ All notable changes to the Deep Work plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.4.2] — 2026-10-14 (GPT-6 Codex Catalogue)
+
+### Changed
+
+- The Codex catalogue moves to the latest generation of each line: light `gpt-6-luna`, standard and deep `gpt-6.1-sol`. Terra has no GPT-6 successor, Codex labels it "Older" and it is priced no lower than 6.1 Sol, so standard moves off it; standard and deep now share a model and differ by role effort. `CATALOG_VERSION` is 3.
+- `gpt-5.6-*` and `gpt-6-sol` stay recognized for existing receipts and pins but are no longer defaults. `gpt-6-astra` remains explicit-only.
+
+### Fixed
+
+- Pinning the model shared by standard and deep no longer records `floor_overridden_by_pin` against a deep floor; the reverse lookup now resolves the highest tier a model is pinned to. Recognized pins outside the default catalogue (for example `gpt-5.6-terra`) are still compared with the floor by their capability tier.
+- Recognized-but-not-default model ids no longer raise a capability warning in `--model-routing`.
+
 ## [7.4.1] — 2026-09-20
 
 ### Fixed

@@ -329,6 +329,33 @@ test('pin은 floor보다 최종 우선이며 floor override를 기록한다', ()
   assert.equal(r.meta.policy.floors_effective.implement, 'deep');
 });
 
+test('pin of the model shared by standard and deep is not reported as overriding a deep floor', () => {
+  const run = (model) => decideModelRouting({ signals: { tracked_files: 50 }, runtime: 'codex', riskClass: 'high',
+    pinned: { implement: model } });
+  const shared = run('gpt-6.1-sol');
+  assert.equal(shared.model_routing.implement, 'gpt-6.1-sol');
+  assert.equal(shared.meta.policy.floors_effective.implement, 'deep');
+  assert.equal(shared.meta.policy.floor_overridden_by_pin.implement, undefined);
+  const lower = run('gpt-6-luna');
+  assert.equal(lower.model_routing.implement, 'gpt-6-luna');
+  assert.equal(lower.meta.policy.floor_overridden_by_pin.implement, true);
+});
+
+test('recognized pins outside the default catalog are still compared with the floor by capability tier', () => {
+  const run = (model) => decideModelRouting({ signals: { tracked_files: 50 }, runtime: 'codex', riskClass: 'high',
+    pinned: { implement: model } });
+  for (const model of ['gpt-5.6-terra', 'gpt-5.6-luna']) {
+    const r = run(model);
+    assert.equal(r.model_routing.implement, model);
+    assert.equal(r.meta.policy.floor_overridden_by_pin.implement, true);
+    assert.deepEqual(r.warnings.filter((w) => w.includes(model)), []);
+  }
+  for (const model of ['gpt-5.6-sol', 'gpt-6-sol', 'gpt-6-astra', 'main']) {
+    assert.equal(run(model).meta.policy.floor_overridden_by_pin.implement, undefined);
+  }
+  assert.equal(run('gpt-9-foo').meta.policy.floor_overridden_by_pin.implement, undefined);
+});
+
 test('risk/floor 부재는 고정 clock에서 기존 shape를 보존하고 policy/efforts를 생략한다', () => {
   const r = decideModelRouting({ signals: { tracked_files: 500 }, taskText: 't', runtime: 'claude',
     now: '2026-07-21T00:00:00.000Z' });

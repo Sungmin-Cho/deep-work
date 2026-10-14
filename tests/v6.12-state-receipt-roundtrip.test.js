@@ -34,7 +34,7 @@ const REVIEW_EXECUTION = {
   points: {
     final: {
       mode: 'dual',
-      reviewers: [{ role: 'executability', channel: 'codex-cli', model: 'gpt-5.6-sol',
+      reviewers: [{ role: 'executability', channel: 'codex-cli', model: 'gpt-6.1-sol',
         effort: 'high', effort_applied: true, required: true, status: 'completed',
         fallback_used: false, report_ref: 'reviews/final-round1-findings.json' }],
       rounds: 1,

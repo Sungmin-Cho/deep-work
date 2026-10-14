@@ -1,8 +1,11 @@
 'use strict';
-const {mergeCatalog,TIERS}=require('./model-catalog.js');
+const {mergeCatalog,tierForModel}=require('./model-catalog.js');
 const CAPABILITIES=Object.freeze({
  'claude-fable-5-1':{runtime:'claude',tier:'deep',efforts:['low','medium','high','max']},
  'gpt-6-astra':{runtime:'codex',tier:'deep',efforts:['low','medium','high','xhigh','max','ultra']},
+ 'gpt-6.1-sol':{runtime:'codex',tier:'deep',efforts:['low','medium','high','xhigh','max','ultra']},
+ 'gpt-6-sol':{runtime:'codex',tier:'deep',efforts:['low','medium','high','xhigh','max','ultra']},
+ 'gpt-6-luna':{runtime:'codex',tier:'light',efforts:['low','medium','high','xhigh','max']},
  'gpt-5.6-sol':{runtime:'codex',tier:'deep',efforts:['low','medium','high','xhigh','max','ultra']},
  'gpt-5.6-terra':{runtime:'codex',tier:'standard',efforts:['low','medium','high','xhigh','max','ultra']},
  'gpt-5.6-luna':{runtime:'codex',tier:'light',efforts:['low','medium','high','xhigh','max']},
@@ -14,7 +17,7 @@ function resolveModelCapability({runtime,model,catalogOverride}={}){
  const known=CAPABILITIES[model]||(alias?CAPABILITIES[alias]:null),catalog=mergeCatalog(catalogOverride);
  const inferred=/^(?:gpt-|o[134](?:-|$))/.test(model||'')?'codex':/^(?:claude-|haiku$|sonnet$|opus$)/.test(model||'')?'claude':null;
  const owner=known?.runtime||inferred;
- const tier=known?.tier||TIERS.find(t=>catalog[runtime]?.[t]===model)||null;
+ const tier=known?.tier||tierForModel(model,runtime,catalog);
  const status=owner&&owner!==runtime?'foreign':model==='main'||known||tier?'recognized':'unverified';
  return {status,runtime,model,nominal_tier:tier,supported_efforts:known?[...known.efforts]:[],observed_model:null};
 }

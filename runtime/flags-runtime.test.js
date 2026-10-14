@@ -30,6 +30,15 @@ test('--model-routing unknown pin is preserved with visible verification warning
   assert.ok(f.warnings.some((w) => /gpt99/.test(w)));
 });
 
+test('--model-routing recognized-but-not-default capability ids do not warn; unknown ids still do', () => {
+  const known = parseFlags(['--model-routing=implement=gpt-5.6-sol,test=gpt-6-sol']);
+  assert.strictEqual(known.model_routing, 'implement=gpt-5.6-sol,test=gpt-6-sol');
+  assert.deepStrictEqual(known.warnings, []);
+  const unknown = parseFlags(['--model-routing=implement=gpt-9-foo']);
+  assert.strictEqual(unknown.model_routing, 'implement=gpt-9-foo');
+  assert.ok(unknown.warnings.some((w) => /gpt-9-foo/.test(w)));
+});
+
 test('--model-routing 전 항목 무효 → null + 경고', () => {
   const f = parseFlags(['--model-routing=bogus']);
   assert.strictEqual(f.model_routing, null);

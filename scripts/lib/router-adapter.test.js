@@ -22,7 +22,7 @@ function decision(overrides = {}) {
     router_plugin_version: '1.0.0',
     policy_sha256: 'a'.repeat(64),
     risk_band: 'MEDIUM',
-    selected_model: 'gpt-5.6-luna',
+    selected_model: 'gpt-6-luna',
     selected_effort: 'MEDIUM',
     review: { band: 'MEDIUM', reviewers: ['worker_balanced'] },
     ...overrides,

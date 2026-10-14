@@ -7,6 +7,18 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 형식은 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)를 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [7.4.2] — 2026-10-14 (GPT-6 Codex 카탈로그)
+
+### 변경
+
+- Codex 카탈로그를 각 라인의 최신 세대로 옮깁니다. light는 `gpt-6-luna`, standard와 deep은 `gpt-6.1-sol`입니다. Terra는 GPT-6 후속이 없고 Codex가 "Older"로 표기하며 가격도 6.1 Sol보다 낮지 않아 standard에서 제외했습니다. standard와 deep은 같은 모델을 쓰며 role effort로 구분됩니다. `CATALOG_VERSION`은 3입니다.
+- `gpt-5.6-*`와 `gpt-6-sol`은 기존 receipt와 pin이 계속 해석되도록 인식하지만 더 이상 기본값이 아닙니다. `gpt-6-astra`는 명시 pin 전용으로 유지합니다.
+
+### 수정
+
+- standard와 deep이 공유하는 모델을 pin해도 deep floor를 덮어쓴 것으로 `floor_overridden_by_pin`에 기록하지 않습니다. 역조회가 모델이 pin된 가장 높은 tier를 반환합니다. 기본 카탈로그 밖의 인식된 pin(예: `gpt-5.6-terra`)은 capability tier로 floor와 계속 비교합니다.
+- 인식되지만 기본값이 아닌 모델 id는 `--model-routing`에서 capability 경고를 내지 않습니다.
+
 ## [7.4.1] — 2026-09-20
 
 ### 수정

@@ -671,9 +671,9 @@ test('review prompt authority cannot be a raw worktree file', async () => {
 
 test('review route accepts bounded effort/model flags and declares them in its contract', () => {
   const parsed = parseDispatcher(['review','run','--engine','codex','--prompt-file','prompt.tmp',
-    '--timeout-ms','1000','--mode','read-only','--effort','xhigh','--model','gpt-5.6-sol']);
+    '--timeout-ms','1000','--mode','read-only','--effort','xhigh','--model','gpt-6.1-sol']);
   assert.equal(parsed.flags.effort, 'xhigh');
-  assert.equal(parsed.flags.model, 'gpt-5.6-sol');
+  assert.equal(parsed.flags.model, 'gpt-6.1-sol');
   assert.throws(() => parseDispatcher(['review','run','--engine','codex','--prompt-file','prompt.tmp',
     '--timeout-ms','1000','--mode','read-only','--effort','extreme']), /invalid-enum/);
   const contract = ROUTE_CONTRACTS.get('review run');
@@ -688,11 +688,11 @@ function reviewResult(exitCode = 0, stdout = 'ok') {
 test('Codex effort probe success applies -c and records high effort as applied', async () => {
   const runs = [];
   const result = await executeReviewProcess({ engine: 'codex',
-    resolved: { executable: '/codex', argv: ['exec','--sandbox','read-only','--model','gpt-5.6-sol','-'] },
-    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-5.6-sol',
+    resolved: { executable: '/codex', argv: ['exec','--sandbox','read-only','--model','gpt-6.1-sol','-'] },
+    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-6.1-sol',
     probeProcess: async () => reviewResult(0, 'medium high xhigh max'),
     runProcess: async (spec) => { runs.push(spec.args); return reviewResult(); } });
-  assert.deepEqual(runs, [['exec','--sandbox','read-only','--model','gpt-5.6-sol',
+  assert.deepEqual(runs, [['exec','--sandbox','read-only','--model','gpt-6.1-sol',
     '-c','model_reasoning_effort=high','-']]);
   assert.equal(result.effort_applied, true);
   assert.equal(result.effort_clamped, false);
@@ -704,14 +704,14 @@ test('Codex effort probe preserves a Node package launcher argv prefix', async (
   await executeReviewProcess({ engine: 'codex',
     resolved: { executable: process.execPath,
       argv: ['/node_modules/@openai/codex/bin/codex.js','exec','--sandbox','read-only','-'] },
-    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-5.6-sol',
+    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-6.1-sol',
     probeProcess: async (spec) => { probes.push(spec); return reviewResult(0, 'medium high xhigh max'); },
     runProcess: async () => reviewResult() });
   assert.deepEqual(probes, [{ executable: process.execPath,
     args: ['/node_modules/@openai/codex/bin/codex.js','debug','models','--bundled'] }]);
 });
 
-test('Codex max clamps to xhigh for non-gpt-5.6 and records the clamp', async () => {
+test('Codex max clamps to xhigh for models without max and records the clamp', async () => {
   const runs = [];
   const result = await executeReviewProcess({ engine: 'codex',
     resolved: { executable: '/codex', argv: ['exec','--sandbox','read-only','-'] },
@@ -727,7 +727,7 @@ test('Codex effort probe failure retries without the flag and records not applie
   const runs = [];
   const result = await executeReviewProcess({ engine: 'codex',
     resolved: { executable: '/codex', argv: ['exec','--sandbox','read-only','-'] },
-    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'xhigh', model: 'gpt-5.6-sol',
+    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'xhigh', model: 'gpt-6.1-sol',
     probeProcess: async () => reviewResult(1),
     runProcess: async (spec) => { runs.push(spec.args); return reviewResult(); } });
   assert.deepEqual(runs, [['exec','--sandbox','read-only','-']]);
@@ -740,7 +740,7 @@ test('Codex effort execution failure retries once without -c', async () => {
   const runs = [];
   const result = await executeReviewProcess({ engine: 'codex',
     resolved: { executable: '/codex', argv: ['exec','--sandbox','read-only','-'] },
-    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-5.6-sol',
+    prompt: Buffer.from('review'), timeoutMs: 1000, cwd: '/repo', env: {}, effort: 'high', model: 'gpt-6.1-sol',
     probeProcess: async () => reviewResult(0, 'medium high xhigh max'),
     runProcess: async (spec) => { runs.push(spec.args); return runs.length === 1 ? reviewResult(2) : reviewResult(); } });
   assert.ok(runs[0].includes('model_reasoning_effort=high'));

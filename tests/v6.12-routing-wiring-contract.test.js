@@ -7,7 +7,7 @@ const {extractRoutingState}=require('../scripts/risk-profile-cli.js');
 const {updateFrontmatterText}=require('../runtime/frontmatter.js');
 
 test('public routing CLI uses the explicitly selected provider catalog',()=>{
-  for(const [runtime,research,testModel]of [['claude','sonnet','haiku'],['codex','gpt-5.6-terra','gpt-5.6-luna']]){
+  for(const [runtime,research,testModel]of [['claude','sonnet','haiku'],['codex','gpt-6.1-sol','gpt-6-luna']]){
     const result=JSON.parse(execFileSync(process.execPath,['scripts/model-routing-cli.js','--root','.',
       '--task','runtime wiring contract probe','--difficulty','medium','--runtime',runtime],{cwd:ROOT,encoding:'utf8'}));
     assert.equal(result.meta.runtime,runtime);assert.equal(result.model_routing.research,research);assert.equal(result.model_routing.test,testModel);
