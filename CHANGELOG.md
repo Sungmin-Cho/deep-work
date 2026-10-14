@@ -11,12 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The Codex catalogue moves to the latest generation of each line: light `gpt-6-luna`, standard and deep `gpt-6.1-sol`. Terra has no GPT-6 successor, Codex labels it "Older" and it is priced no lower than 6.1 Sol, so standard moves off it; standard and deep now share a model and differ by role effort. `CATALOG_VERSION` is 3.
+- The Codex catalogue moves to the latest generation of each line: light `gpt-6-luna`, standard and deep `gpt-6.1-sol`. Terra has no GPT-6 successor, Codex labels it "Older" and it is priced no lower than 6.1 Sol, so standard moves off it. Standard and deep now resolve to the same model, so moving between them no longer changes the Codex model; effort still follows the risk profile and role, not the tier. `CATALOG_VERSION` is 3.
 - `gpt-5.6-*` and `gpt-6-sol` stay recognized for existing receipts and pins but are no longer defaults. `gpt-6-astra` remains explicit-only.
 
 ### Fixed
 
-- Pin floor checks now use the same tier as `model_identity.nominal_tier`: the capability table first, then the highest catalogue tier for custom models. Pinning the model shared by standard and deep is no longer recorded as overriding a deep floor, and recognized pins outside the default catalogue (for example `gpt-5.6-terra`, or a full Claude id such as `claude-haiku-5-5`) are compared with the floor.
+- Floor checks for model-id pins now use the same tier as `model_identity.nominal_tier`: the capability table first, then the highest catalogue tier for custom models (tier-name pins such as `implement=standard` are still compared by the requested tier). Pinning the model shared by standard and deep is no longer recorded as overriding a deep floor, and recognized pins outside the default catalogue (for example `gpt-5.6-terra`, or a full Claude id such as `claude-haiku-5-5`) are compared with the floor.
 - Model ids listed in the capability table but not in the default catalogue (for example `gpt-5.6-sol`, `gpt-6-sol`) no longer raise a capability warning in `--model-routing`.
 
 ## [7.4.1] — 2026-09-20

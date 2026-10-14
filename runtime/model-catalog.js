@@ -11,7 +11,8 @@ const EXPLICIT_MODELS=Object.freeze({codex:Object.freeze(['gpt-6-astra'])});
 // terra는 6세대 후속이 없다(2026-09-25 live probe: gpt-6-terra는 ChatGPT 계정이 거부). Codex 자체가 gpt-5.6-terra를
 // "Older balanced model"로 표기하고, 가격도 2.00/12.00 per MTok(입력/출력)으로 gpt-6.1-sol의 2.00/10.00보다 싸지 않으며,
 // "everyday work" 설명은 6.1 Sol로 넘어갔다 → standard도 6.1 Sol로 옮긴다.
-// 그 결과 codex의 standard와 deep은 같은 모델이며, standard/deep의 차이는 모델이 아니라 role effort(EFFORT_CATALOG)가 맡는다.
+// 그 결과 codex의 standard와 deep은 같은 모델이므로 두 tier 사이의 이동은 Codex 모델을 바꾸지 않는다. effort는 tier가 아니라
+// risk profile과 role(EFFORT_CATALOG)로 정해진다.
 // gpt-6-astra는 EXPLICIT_MODELS에만 두어 명시 pin으로만 쓰인다. gpt-5.6-* 와 gpt-6-sol id는 기존 receipt/pin이 계속
 // 해석되도록 model-capabilities.js에서 계속 인식한다(기본값이 아닐 뿐).
 // 가격 자체는 routing formula에 넣지 않는다. stakes/error cost는 기존 methodology risk floor가 담당한다.
