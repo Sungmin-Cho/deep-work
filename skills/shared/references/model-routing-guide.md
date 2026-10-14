@@ -36,7 +36,7 @@ tier 결정에 실제로 쓰이는 신호는 tracked 파일 수(규모 분류)�
 
 ## Override 우선순위 (강한 순)
 
-1. `--model-routing=implement=deep,test=light` (콤마 구분·공백 불가; tier명 또는 현재 런타임 모델명)
+1. `--model-routing=implement=deep,test=light` (콤마 구분·공백 불가; tier명, 현재 런타임 모델명, 또는 capability 표가 인식하는 모델 id(예: `gpt-5.6-sol`). 그 밖의 id도 pin은 보존하되 검증 경고를 낸다)
 2. 프로필 defaults의 concrete 값(user-pinned — 엔진 skip)
 3. `/deep-slice model SLICE-NNN <model>` (per-slice)
 4. 엔진 자동

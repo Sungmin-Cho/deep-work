@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Pin floor checks now use the same tier as `model_identity.nominal_tier`: the capability table first, then the highest catalogue tier for custom models. Pinning the model shared by standard and deep is no longer recorded as overriding a deep floor, and recognized pins outside the default catalogue (for example `gpt-5.6-terra`) are still compared with the floor.
+- Pin floor checks now use the same tier as `model_identity.nominal_tier`: the capability table first, then the highest catalogue tier for custom models. Pinning the model shared by standard and deep is no longer recorded as overriding a deep floor, and recognized pins outside the default catalogue (for example `gpt-5.6-terra`, or a full Claude id such as `claude-haiku-5-5`) are compared with the floor.
 - Recognized-but-not-default model ids no longer raise a capability warning in `--model-routing`.
 
 ## [7.4.1] — 2026-09-20

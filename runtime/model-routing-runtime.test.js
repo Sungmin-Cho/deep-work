@@ -354,6 +354,10 @@ test('recognized pins outside the default catalog are still compared with the fl
     assert.equal(run(model).meta.policy.floor_overridden_by_pin.implement, undefined);
   }
   assert.equal(run('gpt-9-foo').meta.policy.floor_overridden_by_pin.implement, undefined);
+  const claude = (model) => decideModelRouting({ signals: { tracked_files: 50 }, runtime: 'claude', riskClass: 'high',
+    pinned: { implement: model } }).meta.policy.floor_overridden_by_pin.implement;
+  assert.equal(claude('claude-haiku-5-5'), true);
+  assert.equal(claude('claude-opus-5-5'), undefined);
 });
 
 test('floor override and model_identity nominal_tier agree under a catalog override', () => {
