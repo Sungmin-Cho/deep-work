@@ -231,8 +231,10 @@ function decideModelRouting({ signals = {}, taskText = '', difficulty = null, ru
         if(capability.status==='unverified')warnings.push(`model '${pin}' unverified; explicit pin preserved`);
       }
       let pinTier = TIERS.includes(pin) ? pin : null;
-      if (!pinTier && runtimeConcrete.has(pin)) {
-        pinTier = TIERS.find((tier) => resolveTier(tier, runtime, catalog).model === pin) || null;
+      // model_identity.nominal_tier와 같은 출처로 floor와 비교한다: capability 표의 tier가 우선이고,
+      // 표에 없는 커스텀 모델만 카탈로그 위치(가장 높은 tier)를 쓴다. 기본값에서 빠진 gpt-5.6-* pin도 여기서 비교된다.
+      if (!pinTier && pin !== MAIN) {
+        pinTier = resolveModelCapability({ runtime, model: pin, catalogOverride }).nominal_tier || null;
       }
       if (effectiveFloors[phase] && pinTier && tierIndex(pinTier) < tierIndex(effectiveFloors[phase])) {
         floorOverriddenByPin[phase] = true;

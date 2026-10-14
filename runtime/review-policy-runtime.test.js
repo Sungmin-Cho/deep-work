@@ -86,12 +86,12 @@ test('reviewModeOverride changes composition without overriding the codex provid
   const lowered = compile('high', 'slice-diff', { reviewModeOverride: 'single', evaluatorModelOverride: 'opus' });
   assert.equal(lowered.mode, 'single');
   assert.deepEqual(lowered.reviewers.map((reviewer) => reviewer.role), ['semantic','executability']);
-  assert.equal(lowered.reviewers[0].model,'opus');assert.equal(lowered.reviewers[1].model,'gpt-5.6-sol');
+  assert.equal(lowered.reviewers[0].model,'opus');assert.equal(lowered.reviewers[1].model,'gpt-6.1-sol');
   const raised = compile('low', 'slice-diff', { reviewModeOverride: 'dual', evaluatorModelOverride: 'opus' });
   assert.equal(raised.mode, 'dual');
   assert.deepEqual(raised.reviewers.map((reviewer) => reviewer.role), ['semantic', 'executability']);
   assert.equal(raised.reviewers.find((reviewer) => reviewer.channel === 'subagent').model, 'opus');
-  assert.equal(raised.reviewers.find((reviewer) => reviewer.channel === 'codex-cli').model, 'gpt-5.6-sol');
+  assert.equal(raised.reviewers.find((reviewer) => reviewer.channel === 'codex-cli').model, 'gpt-6.1-sol');
 });
 
 test('compiled reviewer models follow their execution channel without cross-runtime leakage', () => {
@@ -100,7 +100,7 @@ test('compiled reviewer models follow their execution channel without cross-runt
   const executability = plan.reviewers.find((reviewer) => reviewer.channel === 'codex-cli');
 
   assert.equal(semantic.model, 'opus');
-  assert.equal(executability.model, 'gpt-5.6-sol');
+  assert.equal(executability.model, 'gpt-6.1-sol');
   assert.notEqual(executability.model, 'opus');
 });
 
@@ -248,22 +248,22 @@ test('B.3 Codex effort mapping is exact and max is model-gated', () => {
   assert.deepEqual(CODEX_REASONING_EFFORT_MAP, {
     medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max',
   });
-  assert.deepEqual(mapCodexReasoningEffort('medium', 'gpt-5.6-sol'), {
+  assert.deepEqual(mapCodexReasoningEffort('medium', 'gpt-6.1-sol'), {
     requested: 'medium', mapped: 'medium', effort_clamped: false,
   });
-  assert.deepEqual(mapCodexReasoningEffort('high', 'gpt-5.6-sol'), {
+  assert.deepEqual(mapCodexReasoningEffort('high', 'gpt-6.1-sol'), {
     requested: 'high', mapped: 'high', effort_clamped: false,
   });
   assert.deepEqual(mapCodexReasoningEffort('xhigh', 'gpt-5.5-codex'), {
     requested: 'xhigh', mapped: 'xhigh', effort_clamped: false,
   });
-  assert.deepEqual(mapCodexReasoningEffort('max', 'gpt-5.6-sol'), {
+  assert.deepEqual(mapCodexReasoningEffort('max', 'gpt-6.1-sol'), {
     requested: 'max', mapped: 'max', effort_clamped: false,
   });
   assert.deepEqual(mapCodexReasoningEffort('max', 'gpt-5.5-codex'), {
     requested: 'max', mapped: 'xhigh', effort_clamped: true,
   });
-  assert.equal(mapCodexReasoningEffort('low', 'gpt-5.6-sol'), null);
+  assert.equal(mapCodexReasoningEffort('low', 'gpt-6.1-sol'), null);
 });
 
 test('subagent and gemini channels permanently record effort_applied false', () => {

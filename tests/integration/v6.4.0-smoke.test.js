@@ -209,8 +209,8 @@ describe('v6.4.0 integration — Health Engine command contracts', () => {
 });
 
 describe('release metadata', () => {
-  it('active release metadata is bumped to 7.4.1 with evergreen usage docs', () => {
-    const version = '7.4.1';
+  it('active release metadata is bumped to 7.4.2 with evergreen usage docs', () => {
+    const version = '7.4.2';
     const featureVersion = '6.9.0';
     const root = path.join(__dirname, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -227,9 +227,12 @@ describe('release metadata', () => {
 
     const changelogCurrent = releaseSection(changelog, version);
     const changelogKoCurrent = releaseSection(changelogKo, version);
-    assert.match(changelogCurrent,/PreToolUse/);
-    assert.match(changelogCurrent,/stderr/);
-    assert.match(changelogKoCurrent,/차단 사유/);
+    assert.match(changelogCurrent,/gpt-6\.1-sol/);
+    assert.match(changelogCurrent,/CATALOG_VERSION/);
+    assert.match(changelogKoCurrent,/카탈로그/);
+    assert.match(releaseSection(changelog, '7.4.1'),/PreToolUse/);
+    assert.match(releaseSection(changelog, '7.4.1'),/stderr/);
+    assert.match(releaseSection(changelogKo, '7.4.1'),/차단 사유/);
     assert.match(releaseSection(changelog, '7.4.0'),/Schema3/);
     assert.match(releaseSection(changelog, '7.4.0'),/outcome verification/);
     assert.match(releaseSection(changelogKo, '7.4.0'),/결과 검증/);

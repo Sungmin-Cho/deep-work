@@ -49,9 +49,9 @@ test('routing_diff — high risk × baseline은 implement tier 불일치 검출'
 test('routing_diff — concrete pin phase는 excluded_reason: concrete-pin (스펙 §4.5)', () => {
   const snap = compilePolicySnapshot({
     riskProfile: { class: 'medium' }, difficulty: null, runtime: 'codex',
-    actualRouting: { research: 'gpt-5.6-terra', implement: 'gpt-5.6-sol', test: 'gpt-5.6-luna' },
+    actualRouting: { research: 'gpt-6.1-sol', implement: 'gpt-6.1-sol', test: 'gpt-6-luna' },
     actualTiers: { research: 'standard', implement: 'standard', test: 'light' }, // implement pin에도 baseline 잔존
-    actualPinned: { implement: 'gpt-5.6-sol' }, // tier 어휘 아님 = concrete pin
+    actualPinned: { implement: 'gpt-6.1-sol' }, // tier 어휘 아님 = concrete pin
   });
   const imp = snap.routing_diff.find((d) => d.phase === 'implement');
   assert.deepStrictEqual(imp, { phase: 'implement', excluded_reason: 'concrete-pin' });

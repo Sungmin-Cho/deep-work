@@ -149,8 +149,8 @@ ASSUMPTION HEALTH REPORT ([N] sessions analyzed)
    Evidence:   5 supporting / 4 weakening / 3 neutral
    Confidence: MEDIUM (0.56)
    Verdict:    CONSIDER loosening to "coaching"
-   [claude-opus-4-6]: HIGH (0.78) — 5S/1W/8 sessions
-   [claude-sonnet-4-6]: LOW (0.32) — 0S/3W/4 sessions
+   [claude-opus-5-5]: HIGH (0.78) — 5S/1W/8 sessions
+   [claude-sonnet-5-5]: LOW (0.32) — 0S/3W/4 sessions
 
 3. research_required_before_plan
    ...

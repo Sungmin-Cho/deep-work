@@ -148,7 +148,7 @@ test('shadow records comparison fields without mutating authority', () => {
         route_schema_version: 1,
         router_plugin_version: '1.0.0',
         policy_sha256: 'c'.repeat(64),
-        selected_model: 'gpt-5.6-luna',
+        selected_model: 'gpt-6-luna',
         selected_effort: 'LOW',
         selected_effort_native: 'low',
         risk_band: 'LOW',
@@ -164,7 +164,7 @@ test('shadow records comparison fields without mutating authority', () => {
   assert.equal(result.shadow.identity.route_schema_version, 1);
   assert.equal(result.shadow.identity.router_plugin_version, '1.0.0');
   assert.equal(result.shadow.identity.policy_sha256, 'c'.repeat(64));
-  assert.equal(result.shadow.comparison.router.selected_model, 'gpt-5.6-luna');
+  assert.equal(result.shadow.comparison.router.selected_model, 'gpt-6-luna');
   assert.equal(result.shadow.comparison.authority.implement, 'opus');
   assert.equal(result.shadow.comparison.downgrade, true);
 });

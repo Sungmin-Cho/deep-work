@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { TIERS, MAIN, CATALOG_VERSION, DEFAULT_CATALOG, mergeCatalog, resolveTier,
-  concreteModelsFor, allConcreteModels } = require('./model-catalog.js');
+  concreteModelsFor, allConcreteModels, tierForModel } = require('./model-catalog.js');
 
 test('TIERS/MAIN 어휘 고정', () => {
   assert.deepStrictEqual(TIERS, ['light', 'standard', 'deep']);
@@ -41,10 +41,10 @@ test('카탈로그 값 null(미pin) → main fail-safe + 경고', () => {
 test('codex 카탈로그 pin(Task 12 실기 검증) — 관측된 모델명과 일치', () => {
   // ~/.codex/models_cache.json 실기 조사로 확정된 값. null로 되돌아가면(fail-safe 재진입)
   // 아래 3개 assert가 실패해 회귀를 잡는다. 근거: .superpowers/sdd/task-12-report.md
-  assert.strictEqual(DEFAULT_CATALOG.codex.light, 'gpt-5.6-luna');
-  assert.strictEqual(DEFAULT_CATALOG.codex.standard, 'gpt-5.6-terra');
-  assert.strictEqual(DEFAULT_CATALOG.codex.deep, 'gpt-5.6-sol');
-  assert.deepStrictEqual(resolveTier('deep', 'codex'), { model: 'gpt-5.6-sol', warning: null });
+  assert.strictEqual(DEFAULT_CATALOG.codex.light, 'gpt-6-luna');
+  assert.strictEqual(DEFAULT_CATALOG.codex.standard, 'gpt-6.1-sol');
+  assert.strictEqual(DEFAULT_CATALOG.codex.deep, 'gpt-6.1-sol');
+  assert.deepStrictEqual(resolveTier('deep', 'codex'), { model: 'gpt-6.1-sol', warning: null });
 });
 
 test('잘못된 tier → main + 경고 (fail-safe, throw 금지)', () => {
@@ -67,5 +67,22 @@ test('concreteModelsFor/allConcreteModels는 null 제외', () => {
 });
 test('Astra is an explicit Codex catalog pin without replacing Sol deep default',()=>{
   assert.ok(concreteModelsFor('codex').includes('gpt-6-astra'));
-  assert.equal(DEFAULT_CATALOG.codex.deep,'gpt-5.6-sol');
+  assert.equal(DEFAULT_CATALOG.codex.deep,'gpt-6.1-sol');
+});
+test('catalog version 3 and codex concrete set follow the latest generation of each line',()=>{
+  assert.equal(CATALOG_VERSION,3);
+  assert.deepStrictEqual(concreteModelsFor('codex'),['gpt-6-luna','gpt-6.1-sol','gpt-6-astra']);
+});
+test('tierForModel returns the highest pinned tier or null',()=>{
+  assert.equal(tierForModel('gpt-6.1-sol','codex'),'deep');
+  assert.equal(tierForModel('gpt-6-luna','codex'),'light');
+  assert.equal(tierForModel('haiku','claude'),'light');
+  assert.equal(tierForModel('gpt-9-foo','codex'),null);
+  assert.equal(tierForModel('gpt-6-astra','codex'),null);
+  assert.equal(tierForModel('main','codex'),null);
+  assert.equal(tierForModel(undefined,'codex'),null);
+  assert.equal(tierForModel(42,'codex'),null);
+  assert.equal(tierForModel('gpt-6.1-sol','unknown'),null);
+  const shared=mergeCatalog({codex:{light:'custom-x',standard:'custom-x'}});
+  assert.equal(tierForModel('custom-x','codex',shared),'standard');
 });

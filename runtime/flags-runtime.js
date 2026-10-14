@@ -1,6 +1,7 @@
 'use strict';
 
 const { TIERS, MAIN, allConcreteModels } = require('./model-catalog.js');
+const { CAPABILITIES } = require('./model-capabilities.js');
 
 function fail(code,message){const error=new Error(`[${code}] ${message||code}`);error.code=code;throw error;}
 const ENUMS=Object.freeze({tdd:new Set(['adaptive','strict','relaxed','coaching','spike']),
@@ -13,7 +14,7 @@ const REVIEW_ALLOWLIST=/^(auto|single|dual)$/;
 const WORKTREE_PATH_BLOCKLIST=/[;|&`$(){}[\]<>!#*?\\]/;
 const MODEL_ROUTING_PHASES=new Set(['brainstorm','research','plan','implement','test']);
 function parseModelRoutingValue(raw){const warnings=[];const entries=[];
-  const allowed=new Set([...TIERS,MAIN,...allConcreteModels()]);
+  const allowed=new Set([...TIERS,MAIN,...allConcreteModels(),...Object.keys(CAPABILITIES)]);
   for(const entry of String(raw||'').split(',')){
     const m=entry.match(/^([a-z]+)=([A-Za-z0-9._-]+)$/);
     if(!m||!MODEL_ROUTING_PHASES.has(m[1])){
