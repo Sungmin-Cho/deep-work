@@ -356,6 +356,20 @@ test('recognized pins outside the default catalog are still compared with the fl
   assert.equal(run('gpt-9-foo').meta.policy.floor_overridden_by_pin.implement, undefined);
 });
 
+test('floor override and model_identity nominal_tier agree under a catalog override', () => {
+  const run = (model, catalogOverride) => decideModelRouting({ signals: { tracked_files: 50 }, runtime: 'codex',
+    riskClass: 'high', pinned: { implement: model }, catalogOverride });
+  const astraDeep = run('gpt-6.1-sol', { codex: { deep: 'gpt-6-astra' } });
+  assert.equal(astraDeep.meta.model_identity.implement.nominal_tier, 'deep');
+  assert.equal(astraDeep.meta.policy.floor_overridden_by_pin.implement, undefined);
+  const lunaDeep = run('gpt-6-luna', { codex: { deep: 'gpt-6-luna' } });
+  assert.equal(lunaDeep.meta.model_identity.implement.nominal_tier, 'light');
+  assert.equal(lunaDeep.meta.policy.floor_overridden_by_pin.implement, true);
+  const custom = run('custom-x', { codex: { standard: 'custom-x' } });
+  assert.equal(custom.meta.model_identity.implement.nominal_tier, 'standard');
+  assert.equal(custom.meta.policy.floor_overridden_by_pin.implement, true);
+});
+
 test('risk/floor 부재는 고정 clock에서 기존 shape를 보존하고 policy/efforts를 생략한다', () => {
   const r = decideModelRouting({ signals: { tracked_files: 500 }, taskText: 't', runtime: 'claude',
     now: '2026-07-21T00:00:00.000Z' });

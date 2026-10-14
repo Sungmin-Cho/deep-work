@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { TIERS, MAIN, resolveTier, mergeCatalog, concreteModelsFor, CATALOG_VERSION, tierForModel } = require('./model-catalog.js');
+const { TIERS, MAIN, resolveTier, mergeCatalog, concreteModelsFor, CATALOG_VERSION } = require('./model-catalog.js');
 const {resolveModelCapability}=require('./model-capabilities.js');
 const { PROFILE_BY_CLASS, EFFORT_CATALOG, TIER_CATALOG,
   validateMethodologyAuthority } = require('./policy-runtime.js');
@@ -231,10 +231,10 @@ function decideModelRouting({ signals = {}, taskText = '', difficulty = null, ru
         if(capability.status==='unverified')warnings.push(`model '${pin}' unverified; explicit pin preserved`);
       }
       let pinTier = TIERS.includes(pin) ? pin : null;
-      // 카탈로그 위치가 우선이고, 기본값에서 빠진 인식 모델(gpt-5.6-* 등)은 capability tier로 floor와 비교한다.
+      // model_identity.nominal_tier와 같은 출처로 floor와 비교한다: capability 표의 tier가 우선이고,
+      // 표에 없는 커스텀 모델만 카탈로그 위치(가장 높은 tier)를 쓴다. 기본값에서 빠진 gpt-5.6-* pin도 여기서 비교된다.
       if (!pinTier && pin !== MAIN) {
-        pinTier = tierForModel(pin, runtime, catalog)
-          || resolveModelCapability({ runtime, model: pin, catalogOverride }).nominal_tier || null;
+        pinTier = resolveModelCapability({ runtime, model: pin, catalogOverride }).nominal_tier || null;
       }
       if (effectiveFloors[phase] && pinTier && tierIndex(pinTier) < tierIndex(effectiveFloors[phase])) {
         floorOverriddenByPin[phase] = true;

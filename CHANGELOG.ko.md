@@ -16,7 +16,7 @@ Deep Work 플러그인의 모든 주요 변경 사항을 이 파일에 기록합
 
 ### 수정
 
-- standard와 deep이 공유하는 모델을 pin해도 deep floor를 덮어쓴 것으로 `floor_overridden_by_pin`에 기록하지 않습니다. 역조회가 모델이 pin된 가장 높은 tier를 반환합니다. 기본 카탈로그 밖의 인식된 pin(예: `gpt-5.6-terra`)은 capability tier로 floor와 계속 비교합니다.
+- pin의 floor 비교가 `model_identity.nominal_tier`와 같은 tier를 씁니다. capability 표가 우선이고, 커스텀 모델은 카탈로그에서 가장 높은 tier를 씁니다. standard와 deep이 공유하는 모델을 pin해도 deep floor를 덮어쓴 것으로 기록하지 않으며, 기본 카탈로그 밖의 인식된 pin(예: `gpt-5.6-terra`)도 floor와 계속 비교합니다.
 - 인식되지만 기본값이 아닌 모델 id는 `--model-routing`에서 capability 경고를 내지 않습니다.
 
 ## [7.4.1] — 2026-09-20
